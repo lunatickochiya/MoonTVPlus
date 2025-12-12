@@ -4519,7 +4519,8 @@ const ThemeConfigComponent = ({
           )}
         </div>
         <p className='mt-4 text-sm text-gray-600 dark:text-gray-400'>
-          启用后，用户浏览器会缓存CSS文件指定时间，减少服务器负载。修改主题后会自动更新缓存。
+          启用后，用户浏览器会缓存CSS文件指定时间，减少服务器负载。
+		  <br/>但可能会导致主题变更延迟。
         </p>
       </div>
 
