@@ -9,6 +9,7 @@ import { Suspense, useEffect, useRef, useState } from 'react';
 import { usePlaySync } from '@/hooks/usePlaySync';
 import { getDoubanDetail } from '@/lib/douban.client';
 import { useDownload } from '@/contexts/DownloadContext';
+import { getAuthInfoFromBrowserCookie } from '@/lib/auth';
 
 import {
   deleteFavorite,
@@ -70,6 +71,26 @@ function PlayPageClient() {
 
   // 获取 Proxy M3U8 Token
   const proxyToken = typeof window !== 'undefined' ? process.env.NEXT_PUBLIC_PROXY_M3U8_TOKEN || '' : '';
+
+  // 检查是否启用离线下载功能
+  const offlineDownloadEnabled = typeof window !== 'undefined' && process.env.NEXT_PUBLIC_ENABLE_OFFLINE_DOWNLOAD === 'true';
+
+  // 获取用户权限信息
+  const [userRole, setUserRole] = useState<'owner' | 'admin' | 'user' | null>(null);
+  const [showOfflineDownload, setShowOfflineDownload] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const authInfo = getAuthInfoFromBrowserCookie();
+      if (authInfo?.role) {
+        setUserRole(authInfo.role);
+        // 只有管理员和站长在启用离线下载功能时才能看到离线下载开关
+        setShowOfflineDownload(
+          offlineDownloadEnabled && (authInfo.role === 'owner' || authInfo.role === 'admin')
+        );
+      }
+    }
+  }, [offlineDownloadEnabled]);
 
   // -----------------------------------------------------------------------------
   // 状态变量（State）
@@ -740,7 +761,7 @@ function PlayPageClient() {
   };
 
   // 更新视频地址
-  const updateVideoUrl = (
+  const updateVideoUrl = async (
     detailData: SearchResult | null,
     episodeIndex: number
   ) => {
@@ -752,6 +773,32 @@ function PlayPageClient() {
       setVideoUrl('');
       return;
     }
+
+    // 先检查是否有离线视频
+    if (showOfflineDownload && currentId && currentSource) {
+      try {
+        const response = await fetch(
+          `/api/offline-play?source=${encodeURIComponent(currentSource)}&videoId=${encodeURIComponent(currentId)}&episodeIndex=${episodeIndex + 1}`
+        );
+
+        if (response.ok) {
+          // 如果有离线视频，使用离线视频地址
+          const offlineUrl = `/api/offline-play?source=${encodeURIComponent(currentSource)}&videoId=${encodeURIComponent(currentId)}&episodeIndex=${episodeIndex + 1}`;
+          if (offlineUrl !== videoUrl) {
+            setVideoUrl(offlineUrl);
+            // 显示通知
+            if (artPlayerRef.current) {
+              artPlayerRef.current.notice.show = '正在播放离线视频';
+            }
+          }
+          return;
+        }
+      } catch (error) {
+        console.log('离线视频不存在，使用在线播放:', error);
+      }
+    }
+
+    // 如果没有离线视频，使用在线地址
     const newUrl = detailData?.episodes[episodeIndex] || '';
     if (newUrl !== videoUrl) {
       setVideoUrl(newUrl);
@@ -759,7 +806,7 @@ function PlayPageClient() {
   };
 
   // 处理下载指定集数（支持批量下载）
-  const handleDownloadEpisode = async (episodeIndexes: number[]) => {
+  const handleDownloadEpisode = async (episodeIndexes: number[], isOfflineMode = false) => {
     if (!detail || !detail.episodes || episodeIndexes.length === 0) {
       if (artPlayerRef.current) {
         artPlayerRef.current.notice.show = '无法获取视频地址';
@@ -773,55 +820,106 @@ function PlayPageClient() {
     let successCount = 0;
     let failCount = 0;
 
-    // 批量处理下载
-    for (const episodeIndex of episodeIndexes) {
-      if (episodeIndex >= detail.episodes.length) {
-        failCount++;
-        continue;
-      }
+    // 离线下载模式
+    if (isOfflineMode) {
+      try {
+        const tasks = episodeIndexes.map((episodeIndex) => {
+          if (episodeIndex >= detail.episodes.length) {
+            return null;
+          }
+          const episodeUrl = detail.episodes[episodeIndex];
 
-      const episodeUrl = detail.episodes[episodeIndex];
-      const proxyUrl = externalPlayerAdBlock
-        ? `${origin}/api/proxy-m3u8?url=${encodeURIComponent(episodeUrl)}&source=${encodeURIComponent(currentSource)}${tokenParam}`
-        : episodeUrl;
-      const isM3u8 = episodeUrl.toLowerCase().includes('.m3u8') || episodeUrl.toLowerCase().includes('/m3u8/');
+          // 根据去广告开关决定是否使用代理
+          const proxyUrl = externalPlayerAdBlock
+            ? `${origin}/api/proxy-m3u8?url=${encodeURIComponent(episodeUrl)}&source=${encodeURIComponent(currentSource)}${tokenParam}`
+            : episodeUrl;
 
-      if (isM3u8) {
-        // M3U8格式 - 使用新的下载器，TS 格式
-        try {
-          const downloadTitle = `${videoTitle}_第${episodeIndex + 1}集`;
-          await addDownloadTask(proxyUrl, downloadTitle, 'TS');
-          successCount++;
-        } catch (error) {
-          console.error(`添加下载任务失败 (第${episodeIndex + 1}集):`, error);
-          failCount++;
+          return {
+            url: proxyUrl,
+            episodeIndex: episodeIndex + 1,
+            source: currentSource,
+            videoId: currentId,
+            videoTitle: videoTitle,
+          };
+        }).filter((task) => task !== null);
+
+        const response = await fetch('/api/offline-download', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ tasks }),
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+          successCount = result.success || tasks.length;
+          failCount = result.failed || 0;
+        } else {
+          throw new Error(result.error || '离线下载失败');
         }
-      } else {
-        // 普通视频格式 - 直接下载
-        try {
-          const a = document.createElement('a');
-          a.href = proxyUrl;
-          a.download = `${videoTitle}_第${episodeIndex + 1}集.mp4`;
-          a.target = '_blank';
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          successCount++;
-          // 添加延迟避免浏览器阻止多个下载
-          await new Promise(resolve => setTimeout(resolve, 300));
-        } catch (error) {
-          console.error(`下载失败 (第${episodeIndex + 1}集):`, error);
+      } catch (error) {
+        console.error('离线下载失败:', error);
+        failCount = episodeIndexes.length;
+        if (artPlayerRef.current) {
+          artPlayerRef.current.notice.show = '离线下载失败：' + (error instanceof Error ? error.message : '未知错误');
+        }
+        return;
+      }
+    } else {
+      // 原有的浏览器下载模式
+      // 批量处理下载
+      for (const episodeIndex of episodeIndexes) {
+        if (episodeIndex >= detail.episodes.length) {
           failCount++;
+          continue;
+        }
+
+        const episodeUrl = detail.episodes[episodeIndex];
+        const proxyUrl = externalPlayerAdBlock
+          ? `${origin}/api/proxy-m3u8?url=${encodeURIComponent(episodeUrl)}&source=${encodeURIComponent(currentSource)}${tokenParam}`
+          : episodeUrl;
+        const isM3u8 = episodeUrl.toLowerCase().includes('.m3u8') || episodeUrl.toLowerCase().includes('/m3u8/');
+
+        if (isM3u8) {
+          // M3U8格式 - 使用新的下载器，TS 格式
+          try {
+            const downloadTitle = `${videoTitle}_第${episodeIndex + 1}集`;
+            await addDownloadTask(proxyUrl, downloadTitle, 'TS');
+            successCount++;
+          } catch (error) {
+            console.error(`添加下载任务失败 (第${episodeIndex + 1}集):`, error);
+            failCount++;
+          }
+        } else {
+          // 普通视频格式 - 直接下载
+          try {
+            const a = document.createElement('a');
+            a.href = proxyUrl;
+            a.download = `${videoTitle}_第${episodeIndex + 1}集.mp4`;
+            a.target = '_blank';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            successCount++;
+            // 添加延迟避免浏览器阻止多个下载
+            await new Promise(resolve => setTimeout(resolve, 300));
+          } catch (error) {
+            console.error(`下载失败 (第${episodeIndex + 1}集):`, error);
+            failCount++;
+          }
         }
       }
     }
 
     // 显示结果通知
     if (artPlayerRef.current) {
+      const mode = isOfflineMode ? '离线下载' : '下载';
       if (failCount === 0) {
-        artPlayerRef.current.notice.show = `已添加 ${successCount} 个下载任务！`;
+        artPlayerRef.current.notice.show = `已添加 ${successCount} 个${mode}任务！`;
       } else if (successCount === 0) {
-        artPlayerRef.current.notice.show = '下载失败，请重试';
+        artPlayerRef.current.notice.show = `${mode}失败，请重试`;
       } else {
         artPlayerRef.current.notice.show = `成功 ${successCount} 个，失败 ${failCount} 个`;
       }
@@ -1528,8 +1626,11 @@ function PlayPageClient() {
 
   // 当集数索引变化时自动更新视频地址
   useEffect(() => {
-    updateVideoUrl(detail, currentEpisodeIndex);
-  }, [detail, currentEpisodeIndex]);
+    const loadVideo = async () => {
+      await updateVideoUrl(detail, currentEpisodeIndex);
+    };
+    loadVideo();
+  }, [detail, currentEpisodeIndex, showOfflineDownload, currentId, currentSource]);
 
   // 进入页面时直接获取全部源信息
   useEffect(() => {
@@ -2647,7 +2748,7 @@ function PlayPageClient() {
         Artplayer.PLAYBACK_RATE = [0.5, 0.75, 1, 1.25, 1.5, 2, 3];
         Artplayer.USE_RAF = true;
 
-        artPlayerRef.current = new Artplayer({
+        const artOptions: any = {
           container: artRef.current!,
         url: videoUrl,
         poster: videoCover,
@@ -2915,7 +3016,7 @@ function PlayPageClient() {
             name: '跳过片头片尾',
             html: '跳过片头片尾',
             switch: skipConfigRef.current.enable,
-            onSwitch: function (item) {
+            onSwitch: function (item: any) {
               const newConfig = {
                 ...skipConfigRef.current,
                 enable: !item.switch,
@@ -3006,7 +3107,9 @@ function PlayPageClient() {
             },
           },
         ],
-      });
+      };
+
+        artPlayerRef.current = new Artplayer(artOptions);
 
       // 监听播放器事件
       artPlayerRef.current.on('ready', async () => {
@@ -4171,6 +4274,7 @@ function PlayPageClient() {
         videoTitle={videoTitle}
         currentEpisodeIndex={currentEpisodeIndex}
         onDownload={handleDownloadEpisode}
+        showOfflineDownload={showOfflineDownload}
       />
 
       {/* 弹幕过滤设置对话框 */}

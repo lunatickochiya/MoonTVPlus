@@ -16,7 +16,9 @@ interface DownloadEpisodeSelectorProps {
   /** 当前集数索引（0开始） */
   currentEpisodeIndex: number;
   /** 下载回调 - 支持批量下载 */
-  onDownload: (episodeIndexes: number[]) => void;
+  onDownload: (episodeIndexes: number[], isOfflineMode?: boolean) => void;
+  /** 是否显示离线下载开关（仅管理员和站长可见） */
+  showOfflineDownload?: boolean;
 }
 
 /**
@@ -30,11 +32,15 @@ const DownloadEpisodeSelector: React.FC<DownloadEpisodeSelectorProps> = ({
   videoTitle,
   currentEpisodeIndex,
   onDownload,
+  showOfflineDownload = false,
 }) => {
   // 多选状态 - 使用 Set 存储选中的集数索引
   const [selectedEpisodes, setSelectedEpisodes] = useState<Set<number>>(
     new Set([currentEpisodeIndex])
   );
+
+  // 离线下载模式开关
+  const [isOfflineMode, setIsOfflineMode] = useState<boolean>(false);
 
   // 每页显示的集数
   const episodesPerPage = 50;
@@ -105,7 +111,7 @@ const DownloadEpisodeSelector: React.FC<DownloadEpisodeSelectorProps> = ({
 
   const handleDownload = () => {
     const episodeIndexes = Array.from(selectedEpisodes).sort((a, b) => a - b);
-    onDownload(episodeIndexes);
+    onDownload(episodeIndexes, isOfflineMode);
     onClose();
   };
 
@@ -160,6 +166,53 @@ const DownloadEpisodeSelector: React.FC<DownloadEpisodeSelectorProps> = ({
             </button>
           </div>
         </div>
+
+        {/* 离线下载开关 */}
+        {showOfflineDownload && (
+          <div className='px-6 py-3 border-b border-gray-200 dark:border-gray-700 bg-blue-50 dark:bg-blue-900/20'>
+            <div className='flex items-center justify-between'>
+              <div className='flex items-center gap-2'>
+                <svg
+                  className='w-5 h-5 text-blue-600 dark:text-blue-400'
+                  fill='none'
+                  stroke='currentColor'
+                  viewBox='0 0 24 24'
+                >
+                  <path
+                    strokeLinecap='round'
+                    strokeLinejoin='round'
+                    strokeWidth='2'
+                    d='M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01'
+                  />
+                </svg>
+                <div>
+                  <div className='text-sm font-medium text-gray-900 dark:text-gray-100'>
+                    离线下载模式
+                  </div>
+                  <div className='text-xs text-gray-500 dark:text-gray-400'>
+                    {isOfflineMode
+                      ? '视频将保存到服务器，可在离线任务中查看进度'
+                      : '视频将直接保存到浏览器本地'}
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsOfflineMode(!isOfflineMode)}
+                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                  isOfflineMode
+                    ? 'bg-blue-600 dark:bg-blue-500'
+                    : 'bg-gray-300 dark:bg-gray-600'
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                    isOfflineMode ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* 分页标签 */}
         {pageCount > 1 && (
