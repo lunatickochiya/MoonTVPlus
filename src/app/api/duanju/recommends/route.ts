@@ -9,6 +9,12 @@ import { cleanHtmlTags } from '@/lib/utils';
 
 export const runtime = 'nodejs';
 
+// 服务端内存缓存
+let cachedRecommends: {
+  timestamp: number;
+  data: SearchResult[];
+} | null = null;
+
 interface ApiSearchItem {
   vod_id: string;
   vod_name: string;
@@ -34,6 +40,27 @@ interface CmsClassResponse {
  */
 export async function GET() {
   try {
+    // 检查内存缓存
+    const now = Date.now();
+    const CACHE_DURATION = 60 * 60 * 1000; // 1小时
+
+    if (cachedRecommends && now - cachedRecommends.timestamp < CACHE_DURATION) {
+      console.log('使用缓存的短剧推荐数据');
+      const cacheTime = await getCacheTime();
+      return NextResponse.json(
+        {
+          code: 200,
+          message: '获取成功',
+          data: cachedRecommends.data,
+        },
+        {
+          headers: {
+            'Cache-Control': `public, max-age=${cacheTime}, s-maxage=${cacheTime}`,
+          },
+        }
+      );
+    }
+
     // 获取短剧视频源列表
     const sources = await getDuanjuSources();
 
@@ -166,6 +193,12 @@ export async function GET() {
       .slice(0, 20);
 
     console.log(`返回 ${filteredVideos.length} 个短剧视频`);
+
+    // 保存到内存缓存
+    cachedRecommends = {
+      timestamp: Date.now(),
+      data: filteredVideos,
+    };
 
     const cacheTime = await getCacheTime();
     return NextResponse.json(
