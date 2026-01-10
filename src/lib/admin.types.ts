@@ -22,7 +22,7 @@ export interface AdminConfig {
     // TMDB配置
     TMDBApiKey?: string;
     TMDBProxy?: string;
-    BannerDataSource?: string; // 轮播图数据源：TMDB 或 TX
+    BannerDataSource?: string; // 轮播图数据源：TMDB、TX 或 Douban
     RecommendationDataSource?: string; // 更多推荐数据源：Douban、TMDB、Mixed、MixedSmart
     // Pansou配置
     PansouApiUrl?: string;
@@ -111,6 +111,7 @@ export interface AdminConfig {
     LastRefreshTime?: number; // 上次刷新时间戳
     ResourceCount?: number; // 资源数量
     ScanInterval?: number; // 定时扫描间隔（分钟），0表示关闭，最低60分钟
+    ScanMode?: 'torrent' | 'name' | 'hybrid'; // 扫描模式：torrent=种子库匹配，name=名字匹配，hybrid=混合模式（默认）
   };
   AIConfig?: {
     Enabled: boolean; // 是否启用AI问片功能
@@ -153,6 +154,43 @@ export interface AdminConfig {
     Temperature?: number; // AI温度参数（0-2），默认0.7
     MaxTokens?: number; // 最大回复token数，默认1000
     SystemPrompt?: string; // 自定义系统提示词
+    // AI问片默认消息配置
+    DefaultMessageNoVideo?: string; // 无视频时的默认消息
+    DefaultMessageWithVideo?: string; // 有视频时的默认消息（支持 {title} 替换符）
+  };
+  EmbyConfig?: {
+    // 新格式：多源配置（推荐）
+    Sources?: Array<{
+      key: string; // 唯一标识，如 'emby1', 'emby2'
+      name: string; // 显示名称，如 '家庭Emby', '公司Emby'
+      enabled: boolean; // 是否启用
+      ServerURL: string; // Emby服务器地址
+      ApiKey?: string; // API Key（推荐方式）
+      Username?: string; // 用户名（或使用API Key）
+      Password?: string; // 密码
+      UserId?: string; // 用户ID（登录后获取）
+      AuthToken?: string; // 认证令牌（用户名密码登录后获取）
+      Libraries?: string[]; // 要显示的媒体库ID（可选，默认全部）
+      LastSyncTime?: number; // 最后同步时间戳
+      ItemCount?: number; // 媒体项数量
+      isDefault?: boolean; // 是否为默认源（用于向后兼容）
+      // 高级流媒体选项
+      removeEmbyPrefix?: boolean; // 播放链接移除/emby前缀
+      appendMediaSourceId?: boolean; // 拼接MediaSourceId参数
+      transcodeMp4?: boolean; // 转码mp4
+      proxyPlay?: boolean; // 视频播放代理开关
+    }>;
+    // 旧格式：单源配置（向后兼容）
+    Enabled?: boolean;
+    ServerURL?: string;
+    ApiKey?: string;
+    Username?: string;
+    Password?: string;
+    UserId?: string;
+    AuthToken?: string;
+    Libraries?: string[];
+    LastSyncTime?: number;
+    ItemCount?: number;
   };
 }
 

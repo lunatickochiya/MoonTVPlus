@@ -54,6 +54,8 @@ export async function GET(request: NextRequest) {
     AIEnableHomepageEntry: config.AIConfig?.EnableHomepageEntry || false,
     AIEnableVideoCardEntry: config.AIConfig?.EnableVideoCardEntry || false,
     AIEnablePlayPageEntry: config.AIConfig?.EnablePlayPageEntry || false,
+    AIDefaultMessageNoVideo: config.AIConfig?.DefaultMessageNoVideo || '',
+    AIDefaultMessageWithVideo: config.AIConfig?.DefaultMessageWithVideo || '',
   };
   return NextResponse.json(result);
 }

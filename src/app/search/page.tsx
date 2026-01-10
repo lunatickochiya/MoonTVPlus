@@ -212,28 +212,106 @@ function SearchPageClient() {
     return order === 'asc' ? aNum - bNum : bNum - aNum;
   };
 
+  // 规范化标题用于聚合（去除特殊符号、括号、空格和全角空格）
+  const normalizeTitle = (title: string) => {
+    return title
+      .replace(/[\s\u3000]/g, '') // 去除空格和全角空格
+      .replace(/[()（）[\]【】{}「」『』<>《》]/g, '') // 去除各种括号
+      .replace(/[^\w\u4e00-\u9fa5]/g, ''); // 去除特殊符号，保留字母、数字、下划线和中文
+  };
+
+  // 辅助函数：获取视频类型
+  const getType = (item: SearchResult): 'movie' | 'tv' => {
+    // 1. Emby 和 OpenList 源：使用 type_name（基于 TMDB，最可靠）
+    if (item.source === 'emby' || item.source?.startsWith('emby_') || item.source === 'openlist') {
+      return item.type_name === '电影' ? 'movie' : 'tv';
+    }
+
+    // 2. API 采集源：综合判断
+    const typeName = item.type_name?.toLowerCase() || '';
+
+    // 2.1 明确包含"电影"或"movie"或"片"的，判断为电影
+    if (typeName.includes('电影') || typeName.includes('movie') ||
+        typeName.endsWith('片') && !typeName.includes('动漫')) {
+      return 'movie';
+    }
+
+    // 2.2 包含"剧"、"动漫"、"综艺"等关键词的，判断为剧集
+    if (typeName.includes('剧') || typeName.includes('动漫') ||
+        typeName.includes('综艺') || typeName.includes('anime')) {
+      return 'tv';
+    }
+
+    // 2.3 检查 episodes_titles：如果包含"第X集"，判断为剧集
+    if (item.episodes_titles && item.episodes_titles.length > 0) {
+      const firstTitle = item.episodes_titles[0] || '';
+      if (/第\d+集|第\d+话|EP?\d+/i.test(firstTitle)) {
+        return 'tv';
+      }
+    }
+
+    // 2.4 兜底：使用 episodes.length（最不可靠）
+    return item.episodes.length === 1 ? 'movie' : 'tv';
+  };
   // 聚合后的结果（按标题和年份分组）
   const aggregatedResults = useMemo(() => {
-    const map = new Map<string, SearchResult[]>();
-    const keyOrder: string[] = []; // 记录键出现的顺序
+    //===== 阶段1：按 normalizedTitle-type 初步分组 =====
+    const preliminaryMap = new Map<string, SearchResult[]>();
 
     searchResults.forEach((item) => {
-      // 使用 title + year + type 作为键，year 必然存在，但依然兜底 'unknown'
-      const key = `${item.title.replaceAll(' ', '')}-${item.year || 'unknown'
-        }-${item.episodes.length === 1 ? 'movie' : 'tv'}`;
-      const arr = map.get(key) || [];
+      const normalizedTitle = normalizeTitle(item.title);
+      const type = getType(item);
+      const preliminaryKey = `${normalizedTitle}-${type}`;
 
-      // 如果是新的键，记录其顺序
-      if (arr.length === 0) {
-        keyOrder.push(key);
-      }
-
+      const arr = preliminaryMap.get(preliminaryKey) || [];
       arr.push(item);
-      map.set(key, arr);
+      preliminaryMap.set(preliminaryKey, arr);
+    });
+
+    //===== 阶段2：智能年份推断和最终分组 =====
+    const finalMap = new Map<string, SearchResult[]>();
+    const keyOrder: string[] = [];
+
+    preliminaryMap.forEach((group, preliminaryKey) => {
+      // 分离有年份和无年份的结果
+  const withYear = new Map<string, SearchResult[]>();
+      const withoutYear: SearchResult[] = [];
+
+      group.forEach((item) => {
+        const year = item.year;
+
+        // 判断是否为有效年份：必须是4位数字，且不能是空字符串或'unknown'
+        if (year && year.trim() !== '' && year !== 'unknown' && /^\d{4}$/.test(year)) {
+          // 有有效年份
+        const arr = withYear.get(year) || [];
+          arr.push(item);
+          withYear.set(year, arr);
+        } else {
+          // 无年份（包括空字符串、'unknown'、null、undefined等）
+          withoutYear.push(item);
+        }
+      });
+
+      // 如果有有效年份组
+      if (withYear.size > 0) {
+        // 将无年份的结果复制到每个有年份的组中
+        withYear.forEach((yearGroup, year) => {
+          const finalKey = `${preliminaryKey}-${year}`;
+          // 合并：有年份的 + 无年份的（复制）
+          const mergedGroup = [...yearGroup, ...withoutYear];
+          finalMap.set(finalKey, mergedGroup);
+          keyOrder.push(finalKey);
+        });
+      } else if (withoutYear.length > 0) {
+        // 如果完全没有年份信息，单独成组
+        const finalKey = `${preliminaryKey}-unknown`;
+        finalMap.set(finalKey, withoutYear);
+        keyOrder.push(finalKey);
+      }
     });
 
     // 按出现顺序返回聚合结果
-    return keyOrder.map(key => [key, map.get(key)!] as [string, SearchResult[]]);
+    return keyOrder.map(key => [key, finalMap.get(key)!] as [string, SearchResult[]]);
   }, [searchResults]);
 
   // 当聚合结果变化时，如果某个聚合已存在，则调用其卡片 ref 的 set 方法增量更新
@@ -282,7 +360,26 @@ function SearchPageClient() {
     const sourceOptions: { label: string; value: string }[] = [
       { label: '全部来源', value: 'all' },
       ...Array.from(sourcesSet.entries())
-        .sort((a, b) => a[1].localeCompare(b[1]))
+        .sort((a, b) => {
+          // 判断是否为 openlist
+          const aIsOpenList = a[0] === 'openlist';
+          const bIsOpenList = b[0] === 'openlist';
+
+          // 判断是否为 emby 源（包括 emby 和 emby_xxx 格式）
+          const aIsEmby = a[0] === 'emby' || a[0].startsWith('emby_');
+          const bIsEmby = b[0] === 'emby' || b[0].startsWith('emby_');
+
+          // 优先级：OpenList(100) > Emby(90) > 其他(0)
+          const aPriority = aIsOpenList ? 100 : aIsEmby ? 90 : 0;
+          const bPriority = bIsOpenList ? 100 : bIsEmby ? 90 : 0;
+
+          if (aPriority !== bPriority) {
+            return bPriority - aPriority; // 降序排列
+          }
+
+          // 同优先级内按名称排序
+          return a[1].localeCompare(b[1]);
+        })
         .map(([value, label]) => ({ label, value })),
     ];
 
@@ -999,7 +1096,14 @@ function SearchPageClient() {
                       const poster = group[0]?.poster || '';
                       const year = group[0]?.year || 'unknown';
                       const { episodes, source_names, douban_id } = computeGroupStats(group);
-                      const type = episodes === 1 ? 'movie' : 'tv';
+
+                      // 从 mapKey 中提取类型（mapKey 格式：normalizedTitle-type-year）
+                      // 找到最后一个 '-' 之前的部分，再找倒数第二个 '-'
+                      const lastDashIndex = mapKey.lastIndexOf('-');
+                      const secondLastDashIndex = mapKey.lastIndexOf('-', lastDashIndex - 1);
+                      const type = secondLastDashIndex > 0
+                        ? mapKey.substring(secondLastDashIndex + 1, lastDashIndex) as 'movie' | 'tv'
+                        : (episodes === 1 ? 'movie' : 'tv'); // 兜底
 
                       // 如果该聚合第一次出现，写入初始统计
                       if (!groupStatsRef.current.has(mapKey)) {

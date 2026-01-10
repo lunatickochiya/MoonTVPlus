@@ -65,10 +65,16 @@ export async function POST(request: NextRequest) {
         if (!key || !name || !api) {
           return NextResponse.json({ error: '缺少必要参数' }, { status: 400 });
         }
-        // 禁止添加 openlist 保留关键字
+        // 禁止添加 openlist 和 emby 保留关键字
         if (key === 'openlist') {
           return NextResponse.json(
             { error: 'openlist 是保留关键字，不能作为视频源 key' },
+            { status: 400 }
+          );
+        }
+        if (key === 'emby') {
+          return NextResponse.json(
+            { error: 'emby 是保留关键字，不能作为视频源 key' },
             { status: 400 }
           );
         }
@@ -167,10 +173,17 @@ export async function POST(request: NextRequest) {
         if (!Array.isArray(keys) || keys.length === 0) {
           return NextResponse.json({ error: '缺少 keys 参数或为空' }, { status: 400 });
         }
-        // 过滤掉 from=config 的源，但不报错
-        const keysToDelete = keys.filter(key => {
+        // 过滤掉 from=config 的源，记录跳过的数量
+        const keysToDelete: string[] = [];
+        const skippedKeys: string[] = [];
+
+        keys.forEach(key => {
           const entry = adminConfig.SourceConfig.find((s) => s.key === key);
-          return entry && entry.from !== 'config';
+          if (entry && entry.from === 'config') {
+            skippedKeys.push(key);
+          } else if (entry) {
+            keysToDelete.push(key);
+          }
         });
 
         // 批量删除
@@ -199,6 +212,12 @@ export async function POST(request: NextRequest) {
             }
           });
         }
+
+        // 保存批量删除的统计信息，稍后返回
+        (body as any)._batchDeleteResult = {
+          deleted: keysToDelete.length,
+          skipped: skippedKeys.length,
+        };
         break;
       }
       case 'sort': {
@@ -251,8 +270,17 @@ export async function POST(request: NextRequest) {
       // 不影响主流程，继续执行
     }
 
+    // 构建响应数据
+    const responseData: Record<string, any> = { ok: true };
+
+    // 如果是批量删除操作，包含统计信息
+    if (action === 'batch_delete' && (body as any)._batchDeleteResult) {
+      responseData.deleted = (body as any)._batchDeleteResult.deleted;
+      responseData.skipped = (body as any)._batchDeleteResult.skipped;
+    }
+
     return NextResponse.json(
-      { ok: true },
+      responseData,
       {
         headers: {
           'Cache-Control': 'no-store',

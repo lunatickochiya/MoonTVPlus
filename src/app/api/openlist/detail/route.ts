@@ -127,6 +127,7 @@ export async function GET(request: NextRequest) {
           season: parsed.season,
           title: parsed.title,
           parsed_from: 'filename',
+          isOVA: parsed.isOVA,
         };
       }
 
@@ -174,6 +175,7 @@ export async function GET(request: NextRequest) {
             season: parsed.season,
             title: parsed.title,
             parsed_from: 'filename',
+            isOVA: parsed.isOVA,
           };
         } else {
           // 如果解析失败，尝试从 videoInfo 获取
@@ -192,8 +194,7 @@ export async function GET(request: NextRequest) {
         // 优先使用解析出的标题，其次是"第X集"格式，最后才是文件名
         let displayTitle = episodeInfo.title;
         if (!displayTitle && episodeInfo.episode) {
-          // 支持小数集数显示
-          displayTitle = `第${episodeInfo.episode}集`;
+          displayTitle = episodeInfo.isOVA ? `OVA ${episodeInfo.episode}` : `第${episodeInfo.episode}集`;
         }
         if (!displayTitle) {
           displayTitle = file.name;
@@ -205,9 +206,13 @@ export async function GET(request: NextRequest) {
           season: episodeInfo.season,
           title: displayTitle,
           size: file.size,
+          isOVA: episodeInfo.isOVA,
         };
       })
       .sort((a, b) => {
+        // OVA 排在最后
+        if (a.isOVA && !b.isOVA) return 1;
+        if (!a.isOVA && b.isOVA) return -1;
         // 确保排序稳定，即使 episode 相同也按文件名排序
         if (a.episode !== b.episode) {
           return a.episode - b.episode;

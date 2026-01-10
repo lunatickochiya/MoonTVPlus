@@ -2,8 +2,9 @@
 
 'use client';
 
-import { Star, X } from 'lucide-react';
+import { Star, X, AlertTriangle } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import {
   clearAllFavorites,
@@ -37,6 +38,7 @@ export const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
 }) => {
   const [favoriteItems, setFavoriteItems] = useState<FavoriteItem[]>([]);
   const [loading, setLoading] = useState(false);
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
 
   // 加载收藏数据
   const loadFavorites = async () => {
@@ -83,6 +85,7 @@ export const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
     try {
       await clearAllFavorites();
       setFavoriteItems([]);
+      setShowConfirmDialog(false);
     } catch (error) {
       console.error('清空收藏失败:', error);
     }
@@ -143,7 +146,7 @@ export const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
           <div className='flex items-center gap-2'>
             {favoriteItems.length > 0 && (
               <button
-                onClick={handleClearAll}
+                onClick={() => setShowConfirmDialog(true)}
                 className='text-xs text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 transition-colors'
               >
                 清空全部
@@ -186,6 +189,53 @@ export const FavoritesPanel: React.FC<FavoritesPanelProps> = ({
           )}
         </div>
       </div>
+
+      {/* 确认对话框 */}
+      {showConfirmDialog && createPortal(
+        <div
+          className='fixed inset-0 bg-black bg-opacity-50 z-[9999] flex items-center justify-center p-4 transition-opacity duration-300'
+          onClick={() => setShowConfirmDialog(false)}
+        >
+          <div
+            className='bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full border border-red-200 dark:border-red-800 transition-all duration-300'
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-6">
+              {/* 图标和标题 */}
+              <div className="flex items-start gap-4 mb-4">
+                <div className="flex-shrink-0">
+                  <AlertTriangle className="w-8 h-8 text-red-500" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
+                    清空收藏
+                  </h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    确定要清空所有收藏吗？此操作不可恢复。
+                  </p>
+                </div>
+              </div>
+
+              {/* 按钮组 */}
+              <div className="flex gap-3 mt-6">
+                <button
+                  onClick={() => setShowConfirmDialog(false)}
+                  className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleClearAll}
+                  className="flex-1 px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors"
+                >
+                  确定清空
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </>
   );
 };

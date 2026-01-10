@@ -6,11 +6,17 @@ import {
   Bell,
   Check,
   ChevronDown,
+  ChevronUp,
   Copy,
   Download,
   ExternalLink,
+  Eye,
+  EyeOff,
+  Home,
   KeyRound,
   LogOut,
+  MoveDown,
+  MoveUp,
   Rss,
   Settings,
   Shield,
@@ -89,8 +95,8 @@ export const UserMenu: React.FC = () => {
   const [enableOptimization, setEnableOptimization] = useState(true);
   const [fluidSearch, setFluidSearch] = useState(true);
   const [liveDirectConnect, setLiveDirectConnect] = useState(false);
-  const [danmakuHeatmapDisabled, setDanmakuHeatmapDisabled] = useState(false);
   const [tmdbBackdropDisabled, setTmdbBackdropDisabled] = useState(false);
+  const [enableTrailers, setEnableTrailers] = useState(false);
   const [doubanDataSource, setDoubanDataSource] = useState('cmliussss-cdn-tencent');
   const [doubanImageProxyType, setDoubanImageProxyType] = useState('cmliussss-cdn-tencent');
   const [doubanImageProxyUrl, setDoubanImageProxyUrl] = useState('');
@@ -100,6 +106,32 @@ export const UserMenu: React.FC = () => {
   const [bufferStrategy, setBufferStrategy] = useState('medium');
   const [nextEpisodePreCache, setNextEpisodePreCache] = useState(true);
   const [isBufferStrategyDropdownOpen, setIsBufferStrategyDropdownOpen] = useState(false);
+
+  // 折叠面板状态
+  const [isDoubanSectionOpen, setIsDoubanSectionOpen] = useState(true);
+  const [isUsageSectionOpen, setIsUsageSectionOpen] = useState(false);
+  const [isBufferSectionOpen, setIsBufferSectionOpen] = useState(false);
+  const [isDanmakuSectionOpen, setIsDanmakuSectionOpen] = useState(false);
+  const [isHomepageSectionOpen, setIsHomepageSectionOpen] = useState(false);
+
+  // 首页模块配置
+  interface HomeModule {
+    id: string;
+    name: string;
+    enabled: boolean;
+    order: number;
+  }
+
+  const defaultHomeModules: HomeModule[] = [
+    { id: 'hotMovies', name: '热门电影', enabled: true, order: 0 },
+    { id: 'hotDuanju', name: '热播短剧', enabled: true, order: 1 },
+    { id: 'bangumiCalendar', name: '新番放送', enabled: true, order: 2 },
+    { id: 'hotTvShows', name: '热门剧集', enabled: true, order: 3 },
+    { id: 'hotVarietyShows', name: '热门综艺', enabled: true, order: 4 },
+    { id: 'upcomingContent', name: '即将上映', enabled: true, order: 5 },
+  ];
+
+  const [homeModules, setHomeModules] = useState<HomeModule[]>(defaultHomeModules);
 
   // 豆瓣数据源选项
   const doubanDataSourceOptions = [
@@ -115,15 +147,15 @@ export const UserMenu: React.FC = () => {
 
   // 豆瓣图片代理选项
   const doubanImageProxyTypeOptions = [
-    { value: 'direct', label: '直连（浏览器直接请求豆瓣）' },
     { value: 'server', label: '服务器代理（由服务器代理请求豆瓣）' },
-    { value: 'img3', label: '豆瓣官方精品 CDN（阿里云）' },
     {
       value: 'cmliussss-cdn-tencent',
       label: '豆瓣 CDN By CMLiussss（腾讯云）',
     },
     { value: 'cmliussss-cdn-ali', label: '豆瓣 CDN By CMLiussss（阿里云）' },
     { value: 'custom', label: '自定义代理' },
+    { value: 'direct', label: '直连（浏览器直接请求豆瓣，可能需要浏览器插件才能正常显示）' },
+    { value: 'img3', label: '豆瓣官方精品 CDN（阿里云，可能需要浏览器插件才能正常显示）' },
   ];
 
   // 缓冲策略选项
@@ -317,14 +349,14 @@ export const UserMenu: React.FC = () => {
         setLiveDirectConnect(JSON.parse(savedLiveDirectConnect));
       }
 
-      const savedDanmakuHeatmapDisabled = localStorage.getItem('danmaku_heatmap_disabled');
-      if (savedDanmakuHeatmapDisabled !== null) {
-        setDanmakuHeatmapDisabled(savedDanmakuHeatmapDisabled === 'true');
-      }
-
       const savedTmdbBackdropDisabled = localStorage.getItem('tmdb_backdrop_disabled');
       if (savedTmdbBackdropDisabled !== null) {
         setTmdbBackdropDisabled(savedTmdbBackdropDisabled === 'true');
+      }
+
+      const savedEnableTrailers = localStorage.getItem('enableTrailers');
+      if (savedEnableTrailers !== null) {
+        setEnableTrailers(savedEnableTrailers === 'true');
       }
 
       const savedBufferStrategy = localStorage.getItem('bufferStrategy');
@@ -335,6 +367,16 @@ export const UserMenu: React.FC = () => {
       const savedNextEpisodePreCache = localStorage.getItem('nextEpisodePreCache');
       if (savedNextEpisodePreCache !== null) {
         setNextEpisodePreCache(savedNextEpisodePreCache === 'true');
+      }
+
+      // 加载首页模块配置
+      const savedHomeModules = localStorage.getItem('homeModules');
+      if (savedHomeModules !== null) {
+        try {
+          setHomeModules(JSON.parse(savedHomeModules));
+        } catch (error) {
+          console.error('解析首页模块配置失败:', error);
+        }
       }
     }
   }, []);
@@ -550,17 +592,17 @@ export const UserMenu: React.FC = () => {
     }
   };
 
-  const handleDanmakuHeatmapDisabledToggle = (value: boolean) => {
-    setDanmakuHeatmapDisabled(value);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('danmaku_heatmap_disabled', String(value));
-    }
-  };
-
   const handleTmdbBackdropDisabledToggle = (value: boolean) => {
     setTmdbBackdropDisabled(value);
     if (typeof window !== 'undefined') {
       localStorage.setItem('tmdb_backdrop_disabled', String(value));
+    }
+  };
+
+  const handleEnableTrailersToggle = (value: boolean) => {
+    setEnableTrailers(value);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('enableTrailers', String(value));
     }
   };
 
@@ -599,6 +641,53 @@ export const UserMenu: React.FC = () => {
     }
   };
 
+  // 首页模块配置处理函数
+  const handleHomeModuleToggle = (id: string, enabled: boolean) => {
+    const updatedModules = homeModules.map(module =>
+      module.id === id ? { ...module, enabled } : module
+    );
+    setHomeModules(updatedModules);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('homeModules', JSON.stringify(updatedModules));
+      // 触发自定义事件通知首页刷新
+      window.dispatchEvent(new CustomEvent('homeModulesUpdated'));
+    }
+  };
+
+  const handleHomeModuleMoveUp = (index: number) => {
+    if (index === 0) return;
+    const updatedModules = [...homeModules];
+    const temp = updatedModules[index];
+    updatedModules[index] = updatedModules[index - 1];
+    updatedModules[index - 1] = temp;
+    // 更新order
+    updatedModules.forEach((module, idx) => {
+      module.order = idx;
+    });
+    setHomeModules(updatedModules);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('homeModules', JSON.stringify(updatedModules));
+      window.dispatchEvent(new CustomEvent('homeModulesUpdated'));
+    }
+  };
+
+  const handleHomeModuleMoveDown = (index: number) => {
+    if (index === homeModules.length - 1) return;
+    const updatedModules = [...homeModules];
+    const temp = updatedModules[index];
+    updatedModules[index] = updatedModules[index + 1];
+    updatedModules[index + 1] = temp;
+    // 更新order
+    updatedModules.forEach((module, idx) => {
+      module.order = idx;
+    });
+    setHomeModules(updatedModules);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('homeModules', JSON.stringify(updatedModules));
+      window.dispatchEvent(new CustomEvent('homeModulesUpdated'));
+    }
+  };
+
   // 获取感谢信息
   const getThanksInfo = (dataSource: string) => {
     switch (dataSource) {
@@ -634,26 +723,31 @@ export const UserMenu: React.FC = () => {
     setEnableOptimization(true);
     setFluidSearch(defaultFluidSearch);
     setLiveDirectConnect(false);
-    setDanmakuHeatmapDisabled(false);
+    setTmdbBackdropDisabled(false);
+    setEnableTrailers(false);
     setDoubanProxyUrl(defaultDoubanProxy);
     setDoubanDataSource(defaultDoubanProxyType);
     setDoubanImageProxyType(defaultDoubanImageProxyType);
     setDoubanImageProxyUrl(defaultDoubanImageProxyUrl);
     setBufferStrategy('medium');
     setNextEpisodePreCache(true);
+    setHomeModules(defaultHomeModules);
 
     if (typeof window !== 'undefined') {
       localStorage.setItem('defaultAggregateSearch', JSON.stringify(true));
       localStorage.setItem('enableOptimization', JSON.stringify(true));
       localStorage.setItem('fluidSearch', JSON.stringify(defaultFluidSearch));
       localStorage.setItem('liveDirectConnect', JSON.stringify(false));
-      localStorage.setItem('danmaku_heatmap_disabled', 'false');
+      localStorage.setItem('tmdb_backdrop_disabled', 'false');
+      localStorage.setItem('enableTrailers', 'false');
       localStorage.setItem('doubanProxyUrl', defaultDoubanProxy);
       localStorage.setItem('doubanDataSource', defaultDoubanProxyType);
       localStorage.setItem('doubanImageProxyType', defaultDoubanImageProxyType);
       localStorage.setItem('doubanImageProxyUrl', defaultDoubanImageProxyUrl);
       localStorage.setItem('bufferStrategy', 'medium');
       localStorage.setItem('nextEpisodePreCache', 'true');
+      localStorage.setItem('homeModules', JSON.stringify(defaultHomeModules));
+      window.dispatchEvent(new CustomEvent('homeModulesUpdated'));
     }
   };
 
@@ -910,7 +1004,7 @@ export const UserMenu: React.FC = () => {
       >
         {/* 内容容器 - 独立的滚动区域 */}
         <div
-          className='flex-1 p-6 overflow-y-auto'
+          className='flex-1 px-4 py-6 md:p-6 overflow-y-auto'
           data-panel-content
           style={{
             touchAction: 'pan-y', // 只允许垂直滚动
@@ -941,501 +1035,664 @@ export const UserMenu: React.FC = () => {
           </div>
 
           {/* 设置项 */}
-          <div className='space-y-6'>
-            {/* 豆瓣数据源选择 */}
-            <div className='space-y-3'>
-              <div>
-                <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                  豆瓣数据代理
-                </h4>
-                <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
-                  选择获取豆瓣数据的方式
-                </p>
-              </div>
-              <div className='relative' data-dropdown='douban-datasource'>
-                {/* 自定义下拉选择框 */}
-                <button
-                  type='button'
-                  onClick={() => setIsDoubanDropdownOpen(!isDoubanDropdownOpen)}
-                  className='w-full px-3 py-2.5 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm hover:border-gray-400 dark:hover:border-gray-500 text-left'
-                >
-                  {
-                    doubanDataSourceOptions.find(
-                      (option) => option.value === doubanDataSource
-                    )?.label
-                  }
-                </button>
-
-                {/* 下拉箭头 */}
-                <div className='absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none'>
-                  <ChevronDown
-                    className={`w-4 h-4 text-gray-400 dark:text-gray-500 transition-transform duration-200 ${isDoubanDropdownOpen ? 'rotate-180' : ''
-                      }`}
-                  />
-                </div>
-
-                {/* 下拉选项列表 */}
-                {isDoubanDropdownOpen && (
-                  <div className='absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg max-h-60 overflow-auto'>
-                    {doubanDataSourceOptions.map((option) => (
-                      <button
-                        key={option.value}
-                        type='button'
-                        onClick={() => {
-                          handleDoubanDataSourceChange(option.value);
-                          setIsDoubanDropdownOpen(false);
-                        }}
-                        className={`w-full px-3 py-2.5 text-left text-sm transition-colors duration-150 flex items-center justify-between hover:bg-gray-100 dark:hover:bg-gray-700 ${doubanDataSource === option.value
-                          ? 'bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400'
-                          : 'text-gray-900 dark:text-gray-100'
-                          }`}
-                      >
-                        <span className='truncate'>{option.label}</span>
-                        {doubanDataSource === option.value && (
-                          <Check className='w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0 ml-2' />
-                        )}
-                      </button>
-                    ))}
-                  </div>
+          <div className='space-y-3 md:space-y-4'>
+            {/* 豆瓣设置 */}
+            <div className='border border-gray-200 dark:border-gray-700 rounded-lg overflow-visible'>
+              <button
+                onClick={() => setIsDoubanSectionOpen(!isDoubanSectionOpen)}
+                className='w-full px-3 py-2.5 md:px-4 md:py-3 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-750 transition-colors flex items-center justify-between'
+              >
+                <h3 className='text-base font-semibold text-gray-800 dark:text-gray-200'>
+                  豆瓣设置
+                </h3>
+                {isDoubanSectionOpen ? (
+                  <ChevronUp className='w-5 h-5 text-gray-600 dark:text-gray-400' />
+                ) : (
+                  <ChevronDown className='w-5 h-5 text-gray-600 dark:text-gray-400' />
                 )}
-              </div>
-
-              {/* 感谢信息 */}
-              {getThanksInfo(doubanDataSource) && (
-                <div className='mt-3'>
-                  <button
-                    type='button'
-                    onClick={() =>
-                      window.open(getThanksInfo(doubanDataSource)!.url, '_blank')
-                    }
-                    className='flex items-center justify-center gap-1.5 w-full px-3 text-xs text-gray-500 dark:text-gray-400 cursor-pointer'
-                  >
-                    <span className='font-medium'>
-                      {getThanksInfo(doubanDataSource)!.text}
-                    </span>
-                    <ExternalLink className='w-3.5 opacity-70' />
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* 豆瓣代理地址设置 - 仅在选择自定义代理时显示 */}
-            {doubanDataSource === 'custom' && (
-              <div className='space-y-3'>
-                <div>
-                  <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                    豆瓣代理地址
-                  </h4>
-                  <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
-                    自定义代理服务器地址
-                  </p>
-                </div>
-                <input
-                  type='text'
-                  className='w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 shadow-sm hover:border-gray-400 dark:hover:border-gray-500'
-                  placeholder='例如: https://proxy.example.com/fetch?url='
-                  value={doubanProxyUrl}
-                  onChange={(e) => handleDoubanProxyUrlChange(e.target.value)}
-                />
-              </div>
-            )}
-
-            {/* 分割线 */}
-            <div className='border-t border-gray-200 dark:border-gray-700'></div>
-
-            {/* 豆瓣图片代理设置 */}
-            <div className='space-y-3'>
-              <div>
-                <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                  豆瓣图片代理
-                </h4>
-                <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
-                  选择获取豆瓣图片的方式
-                </p>
-              </div>
-              <div className='relative' data-dropdown='douban-image-proxy'>
-                {/* 自定义下拉选择框 */}
-                <button
-                  type='button'
-                  onClick={() =>
-                    setIsDoubanImageProxyDropdownOpen(
-                      !isDoubanImageProxyDropdownOpen
-                    )
-                  }
-                  className='w-full px-3 py-2.5 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm hover:border-gray-400 dark:hover:border-gray-500 text-left'
-                >
-                  {
-                    doubanImageProxyTypeOptions.find(
-                      (option) => option.value === doubanImageProxyType
-                    )?.label
-                  }
-                </button>
-
-                {/* 下拉箭头 */}
-                <div className='absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none'>
-                  <ChevronDown
-                    className={`w-4 h-4 text-gray-400 dark:text-gray-500 transition-transform duration-200 ${isDoubanDropdownOpen ? 'rotate-180' : ''
-                      }`}
-                  />
-                </div>
-
-                {/* 下拉选项列表 */}
-                {isDoubanImageProxyDropdownOpen && (
-                  <div className='absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg max-h-60 overflow-auto'>
-                    {doubanImageProxyTypeOptions.map((option) => (
+              </button>
+              {isDoubanSectionOpen && (
+                <div className='p-3 md:p-4 space-y-4 md:space-y-6'>
+                  {/* 豆瓣数据源选择 */}
+                  <div className='space-y-3'>
+                    <div>
+                      <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+                        豆瓣数据代理
+                      </h4>
+                      <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+                        选择获取豆瓣数据的方式
+                      </p>
+                    </div>
+                    <div className='relative' data-dropdown='douban-datasource'>
+                      {/* 自定义下拉选择框 */}
                       <button
-                        key={option.value}
                         type='button'
-                        onClick={() => {
-                          handleDoubanImageProxyTypeChange(option.value);
-                          setIsDoubanImageProxyDropdownOpen(false);
-                        }}
-                        className={`w-full px-3 py-2.5 text-left text-sm transition-colors duration-150 flex items-center justify-between hover:bg-gray-100 dark:hover:bg-gray-700 ${doubanImageProxyType === option.value
-                          ? 'bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400'
-                          : 'text-gray-900 dark:text-gray-100'
-                          }`}
+                        onClick={() => setIsDoubanDropdownOpen(!isDoubanDropdownOpen)}
+                        className='w-full px-3 py-2.5 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm hover:border-gray-400 dark:hover:border-gray-500 text-left'
                       >
-                        <span className='truncate'>{option.label}</span>
-                        {doubanImageProxyType === option.value && (
-                          <Check className='w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0 ml-2' />
-                        )}
+                        {
+                          doubanDataSourceOptions.find(
+                            (option) => option.value === doubanDataSource
+                          )?.label
+                        }
                       </button>
-                    ))}
-                  </div>
-                )}
-              </div>
 
-              {/* 感谢信息 */}
-              {getThanksInfo(doubanImageProxyType) && (
-                <div className='mt-3'>
-                  <button
-                    type='button'
-                    onClick={() =>
-                      window.open(
-                        getThanksInfo(doubanImageProxyType)!.url,
-                        '_blank'
-                      )
-                    }
-                    className='flex items-center justify-center gap-1.5 w-full px-3 text-xs text-gray-500 dark:text-gray-400 cursor-pointer'
-                  >
-                    <span className='font-medium'>
-                      {getThanksInfo(doubanImageProxyType)!.text}
-                    </span>
-                    <ExternalLink className='w-3.5 opacity-70' />
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* 豆瓣图片代理地址设置 - 仅在选择自定义代理时显示 */}
-            {doubanImageProxyType === 'custom' && (
-              <div className='space-y-3'>
-                <div>
-                  <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                    豆瓣图片代理地址
-                  </h4>
-                  <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
-                    自定义图片代理服务器地址
-                  </p>
-                </div>
-                <input
-                  type='text'
-                  className='w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 shadow-sm hover:border-gray-400 dark:hover:border-gray-500'
-                  placeholder='例如: https://proxy.example.com/fetch?url='
-                  value={doubanImageProxyUrl}
-                  onChange={(e) =>
-                    handleDoubanImageProxyUrlChange(e.target.value)
-                  }
-                />
-              </div>
-            )}
-
-            {/* 分割线 */}
-            <div className='border-t border-gray-200 dark:border-gray-700'></div>
-
-            {/* 默认聚合搜索结果 */}
-            <div className='flex items-center justify-between'>
-              <div>
-                <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                  默认聚合搜索结果
-                </h4>
-                <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
-                  搜索时默认按标题和年份聚合显示结果
-                </p>
-              </div>
-              <label className='flex items-center cursor-pointer'>
-                <div className='relative'>
-                  <input
-                    type='checkbox'
-                    className='sr-only peer'
-                    checked={defaultAggregateSearch}
-                    onChange={(e) => handleAggregateToggle(e.target.checked)}
-                  />
-                  <div className='w-11 h-6 bg-gray-300 rounded-full peer-checked:bg-green-500 transition-colors dark:bg-gray-600'></div>
-                  <div className='absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5'></div>
-                </div>
-              </label>
-            </div>
-
-            {/* 优选和测速 */}
-            <div className='flex items-center justify-between'>
-              <div>
-                <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                  优选和测速
-                </h4>
-                <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
-                  如出现播放器劫持问题可关闭
-                </p>
-              </div>
-              <label className='flex items-center cursor-pointer'>
-                <div className='relative'>
-                  <input
-                    type='checkbox'
-                    className='sr-only peer'
-                    checked={enableOptimization}
-                    onChange={(e) => handleOptimizationToggle(e.target.checked)}
-                  />
-                  <div className='w-11 h-6 bg-gray-300 rounded-full peer-checked:bg-green-500 transition-colors dark:bg-gray-600'></div>
-                  <div className='absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5'></div>
-                </div>
-              </label>
-            </div>
-
-            {/* 流式搜索 */}
-            <div className='flex items-center justify-between'>
-              <div>
-                <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                  流式搜索输出
-                </h4>
-                <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
-                  启用搜索结果实时流式输出，关闭后使用传统一次性搜索
-                </p>
-              </div>
-              <label className='flex items-center cursor-pointer'>
-                <div className='relative'>
-                  <input
-                    type='checkbox'
-                    className='sr-only peer'
-                    checked={fluidSearch}
-                    onChange={(e) => handleFluidSearchToggle(e.target.checked)}
-                  />
-                  <div className='w-11 h-6 bg-gray-300 rounded-full peer-checked:bg-green-500 transition-colors dark:bg-gray-600'></div>
-                  <div className='absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5'></div>
-                </div>
-              </label>
-            </div>
-
-            {/* 直播视频浏览器直连 */}
-            <div className='flex items-center justify-between'>
-              <div>
-                <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                  IPTV 视频浏览器直连
-                </h4>
-                <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
-                  开启 IPTV 视频浏览器直连时，需要自备 Allow CORS 插件
-                </p>
-              </div>
-              <label className='flex items-center cursor-pointer'>
-                <div className='relative'>
-                  <input
-                    type='checkbox'
-                    className='sr-only peer'
-                    checked={liveDirectConnect}
-                    onChange={(e) => handleLiveDirectConnectToggle(e.target.checked)}
-                  />
-                  <div className='w-11 h-6 bg-gray-300 rounded-full peer-checked:bg-green-500 transition-colors dark:bg-gray-600'></div>
-                  <div className='absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5'></div>
-                </div>
-              </label>
-            </div>
-
-            {/* 禁用弹幕热力 */}
-            <div className='flex items-center justify-between'>
-              <div>
-                <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                  禁用弹幕热力图
-                </h4>
-                <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
-                  完全关闭弹幕热力图功能以提升性能（需手动刷新页面生效）
-                </p>
-              </div>
-              <label className='flex items-center cursor-pointer'>
-                <div className='relative'>
-                  <input
-                    type='checkbox'
-                    className='sr-only peer'
-                    checked={danmakuHeatmapDisabled}
-                    onChange={(e) => handleDanmakuHeatmapDisabledToggle(e.target.checked)}
-                  />
-                  <div className='w-11 h-6 bg-gray-300 rounded-full peer-checked:bg-green-500 transition-colors dark:bg-gray-600'></div>
-                  <div className='absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5'></div>
-                </div>
-              </label>
-            </div>
-
-            {/* 禁用背景图渲染 */}
-            <div className='flex items-center justify-between'>
-              <div>
-                <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                  禁用背景图渲染
-                </h4>
-                <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
-                  关闭播放页面的TMDB背景图显示（需手动刷新页面生效）
-                </p>
-              </div>
-              <label className='flex items-center cursor-pointer'>
-                <div className='relative'>
-                  <input
-                    type='checkbox'
-                    className='sr-only peer'
-                    checked={tmdbBackdropDisabled}
-                    onChange={(e) => handleTmdbBackdropDisabledToggle(e.target.checked)}
-                  />
-                  <div className='w-11 h-6 bg-gray-300 rounded-full peer-checked:bg-green-500 transition-colors dark:bg-gray-600'></div>
-                  <div className='absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5'></div>
-                </div>
-              </label>
-            </div>
-
-            {/* 分割线 */}
-            <div className='border-t border-gray-200 dark:border-gray-700'></div>
-
-            {/* 缓冲设置 */}
-            <div className='space-y-4'>
-              <div>
-                <h4 className='text-base font-semibold text-gray-800 dark:text-gray-200'>
-                  缓冲设置
-                </h4>
-                <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
-                  调整播放器缓冲策略（仅在播放页面生效）
-                </p>
-              </div>
-
-              {/* 缓冲策略 */}
-              <div className='space-y-3'>
-                <div>
-                  <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                    缓冲策略
-                  </h4>
-                  <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
-                    设置视频缓冲块大小，影响播放流畅度和流量消耗
-                  </p>
-                </div>
-                <div className='relative' data-dropdown='buffer-strategy'>
-                  {/* 自定义下拉选择框 */}
-                  <button
-                    type='button'
-                    onClick={() => setIsBufferStrategyDropdownOpen(!isBufferStrategyDropdownOpen)}
-                    className='w-full px-3 py-2.5 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm hover:border-gray-400 dark:hover:border-gray-500 text-left'
-                  >
-                    {
-                      bufferStrategyOptions.find(
-                        (option) => option.value === bufferStrategy
-                      )?.label
-                    }
-                  </button>
-
-                  {/* 下拉箭头 */}
-                  <div className='absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none'>
-                    <ChevronDown
-                      className={`w-4 h-4 text-gray-400 dark:text-gray-500 transition-transform duration-200 ${isBufferStrategyDropdownOpen ? 'rotate-180' : ''
-                        }`}
-                    />
-                  </div>
-
-                  {/* 下拉选项列表 */}
-                  {isBufferStrategyDropdownOpen && (
-                    <div className='absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg max-h-60 overflow-auto'>
-                      {bufferStrategyOptions.map((option) => (
-                        <button
-                          key={option.value}
-                          type='button'
-                          onClick={() => {
-                            handleBufferStrategyChange(option.value);
-                            setIsBufferStrategyDropdownOpen(false);
-                          }}
-                          className={`w-full px-3 py-2.5 text-left text-sm transition-colors duration-150 flex items-center justify-between hover:bg-gray-100 dark:hover:bg-gray-700 ${bufferStrategy === option.value
-                            ? 'bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400'
-                            : 'text-gray-900 dark:text-gray-100'
+                      {/* 下拉箭头 */}
+                      <div className='absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none'>
+                        <ChevronDown
+                          className={`w-4 h-4 text-gray-400 dark:text-gray-500 transition-transform duration-200 ${isDoubanDropdownOpen ? 'rotate-180' : ''
                             }`}
+                        />
+                      </div>
+
+                      {/* 下拉选项列表 */}
+                      {isDoubanDropdownOpen && (
+                        <div className='absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg max-h-60 overflow-auto'>
+                          {doubanDataSourceOptions.map((option) => (
+                            <button
+                              key={option.value}
+                              type='button'
+                              onClick={() => {
+                                handleDoubanDataSourceChange(option.value);
+                                setIsDoubanDropdownOpen(false);
+                              }}
+                              className={`w-full px-3 py-2.5 text-left text-sm transition-colors duration-150 flex items-center justify-between hover:bg-gray-100 dark:hover:bg-gray-700 ${doubanDataSource === option.value
+                                ? 'bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400'
+                                : 'text-gray-900 dark:text-gray-100'
+                                }`}
+                            >
+                              <span className='truncate'>{option.label}</span>
+                              {doubanDataSource === option.value && (
+                                <Check className='w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0 ml-2' />
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 感谢信息 */}
+                    {getThanksInfo(doubanDataSource) && (
+                      <div className='mt-3'>
+                        <button
+                          type='button'
+                          onClick={() =>
+                            window.open(getThanksInfo(doubanDataSource)!.url, '_blank')
+                          }
+                          className='flex items-center justify-center gap-1.5 w-full px-3 text-xs text-gray-500 dark:text-gray-400 cursor-pointer'
                         >
-                          <span className='truncate'>{option.label}</span>
-                          {bufferStrategy === option.value && (
-                            <Check className='w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0 ml-2' />
-                          )}
+                          <span className='font-medium'>
+                            {getThanksInfo(doubanDataSource)!.text}
+                          </span>
+                          <ExternalLink className='w-3.5 opacity-70' />
                         </button>
-                      ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 豆瓣代理地址设置 - 仅在选择自定义代理时显示 */}
+                  {doubanDataSource === 'custom' && (
+                    <div className='space-y-3'>
+                      <div>
+                        <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+                          豆瓣代理地址
+                        </h4>
+                        <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+                          自定义代理服务器地址
+                        </p>
+                      </div>
+                      <input
+                        type='text'
+                        className='w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 shadow-sm hover:border-gray-400 dark:hover:border-gray-500'
+                        placeholder='例如: https://proxy.example.com/fetch?url='
+                        value={doubanProxyUrl}
+                        onChange={(e) => handleDoubanProxyUrlChange(e.target.value)}
+                      />
+                    </div>
+                  )}
+
+                  {/* 分割线 */}
+                  <div className='border-t border-gray-200 dark:border-gray-700'></div>
+
+                  {/* 豆瓣图片代理设置 */}
+                  <div className='space-y-3'>
+                    <div>
+                      <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+                        豆瓣图片代理
+                      </h4>
+                      <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+                        选择获取豆瓣图片的方式
+                      </p>
+                    </div>
+                    <div className='relative' data-dropdown='douban-image-proxy'>
+                      {/* 自定义下拉选择框 */}
+                      <button
+                        type='button'
+                        onClick={() =>
+                          setIsDoubanImageProxyDropdownOpen(
+                            !isDoubanImageProxyDropdownOpen
+                          )
+                        }
+                        className='w-full px-3 py-2.5 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm hover:border-gray-400 dark:hover:border-gray-500 text-left'
+                      >
+                        {
+                          doubanImageProxyTypeOptions.find(
+                            (option) => option.value === doubanImageProxyType
+                          )?.label
+                        }
+                      </button>
+
+                      {/* 下拉箭头 */}
+                      <div className='absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none'>
+                        <ChevronDown
+                          className={`w-4 h-4 text-gray-400 dark:text-gray-500 transition-transform duration-200 ${isDoubanDropdownOpen ? 'rotate-180' : ''
+                            }`}
+                        />
+                      </div>
+
+                      {/* 下拉选项列表 */}
+                      {isDoubanImageProxyDropdownOpen && (
+                        <div className='absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg max-h-60 overflow-auto'>
+                          {doubanImageProxyTypeOptions.map((option) => (
+                            <button
+                              key={option.value}
+                              type='button'
+                              onClick={() => {
+                                handleDoubanImageProxyTypeChange(option.value);
+                                setIsDoubanImageProxyDropdownOpen(false);
+                              }}
+                              className={`w-full px-3 py-2.5 text-left text-sm transition-colors duration-150 flex items-center justify-between hover:bg-gray-100 dark:hover:bg-gray-700 ${doubanImageProxyType === option.value
+                                ? 'bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400'
+                                : 'text-gray-900 dark:text-gray-100'
+                                }`}
+                            >
+                              <span className='truncate'>{option.label}</span>
+                              {doubanImageProxyType === option.value && (
+                                <Check className='w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0 ml-2' />
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 感谢信息 */}
+                    {getThanksInfo(doubanImageProxyType) && (
+                      <div className='mt-3'>
+                        <button
+                          type='button'
+                          onClick={() =>
+                            window.open(
+                              getThanksInfo(doubanImageProxyType)!.url,
+                              '_blank'
+                            )
+                          }
+                          className='flex items-center justify-center gap-1.5 w-full px-3 text-xs text-gray-500 dark:text-gray-400 cursor-pointer'
+                        >
+                          <span className='font-medium'>
+                            {getThanksInfo(doubanImageProxyType)!.text}
+                          </span>
+                          <ExternalLink className='w-3.5 opacity-70' />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 豆瓣图片代理地址设置 - 仅在选择自定义代理时显示 */}
+                  {doubanImageProxyType === 'custom' && (
+                    <div className='space-y-3'>
+                      <div>
+                        <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+                          豆瓣图片代理地址
+                        </h4>
+                        <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+                          自定义图片代理服务器地址
+                        </p>
+                      </div>
+                      <input
+                        type='text'
+                        className='w-full px-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 shadow-sm hover:border-gray-400 dark:hover:border-gray-500'
+                        placeholder='例如: https://proxy.example.com/fetch?url='
+                        value={doubanImageProxyUrl}
+                        onChange={(e) =>
+                          handleDoubanImageProxyUrlChange(e.target.value)
+                        }
+                      />
                     </div>
                   )}
                 </div>
-              </div>
-
-              {/* 下集预缓冲 */}
-              <div className='flex items-center justify-between'>
-                <div>
-                  <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                    下集预缓冲
-                  </h4>
-                  <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
-                    播放进度达到90%时，自动预缓冲下一集内容
-                  </p>
-                </div>
-                <label className='flex items-center cursor-pointer'>
-                  <div className='relative'>
-                    <input
-                      type='checkbox'
-                      className='sr-only peer'
-                      checked={nextEpisodePreCache}
-                      onChange={(e) => handleNextEpisodePreCacheToggle(e.target.checked)}
-                    />
-                    <div className='w-11 h-6 bg-gray-300 rounded-full peer-checked:bg-green-500 transition-colors dark:bg-gray-600'></div>
-                    <div className='absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5'></div>
-                  </div>
-                </label>
-              </div>
+              )}
             </div>
 
-            {/* 分割线 */}
-            <div className='border-t border-gray-200 dark:border-gray-700'></div>
-
-            {/* 清除弹幕缓存 */}
-            <div className='space-y-3'>
-              <div>
-                <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
-                  弹幕缓存管理
-                </h4>
-                <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
-                  清除所有已缓存的弹幕数据
-                </p>
-              </div>
+            <div className='border border-gray-200 dark:border-gray-700 rounded-lg overflow-visible'>
               <button
-                onClick={handleClearDanmakuCache}
-                disabled={isClearingCache}
-                className='w-full px-4 py-2.5 bg-red-500 hover:bg-red-600 disabled:bg-red-400 dark:bg-red-600 dark:hover:bg-red-700 dark:disabled:bg-red-500 text-white text-sm font-medium rounded-lg transition-colors duration-200 shadow-sm hover:shadow-md disabled:cursor-not-allowed flex items-center justify-center gap-2'
+                onClick={() => setIsUsageSectionOpen(!isUsageSectionOpen)}
+                className='w-full px-3 py-2.5 md:px-4 md:py-3 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-750 transition-colors flex items-center justify-between'
               >
-                {isClearingCache ? (
-                  <>
-                    <div className='w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin'></div>
-                    <span>清除中...</span>
-                  </>
+                <h3 className='text-base font-semibold text-gray-800 dark:text-gray-200'>
+                  通用设置
+                </h3>
+                {isUsageSectionOpen ? (
+                  <ChevronUp className='w-5 h-5 text-gray-600 dark:text-gray-400' />
                 ) : (
-                  <>
-                    <svg className='w-4 h-4' fill='none' stroke='currentColor' viewBox='0 0 24 24'>
-                      <path strokeLinecap='round' strokeLinejoin='round' strokeWidth={2} d='M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16' />
-                    </svg>
-                    <span>清除弹幕缓存</span>
-                  </>
+                  <ChevronDown className='w-5 h-5 text-gray-600 dark:text-gray-400' />
                 )}
               </button>
+              {isUsageSectionOpen && (
+                <div className='p-3 md:p-4 space-y-4 md:space-y-6'>
+                  {/* 默认聚合搜索结果 */}
+                  <div className='flex items-center justify-between'>
+                    <div>
+                      <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+                        默认聚合搜索结果
+                      </h4>
+                      <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+                        搜索时默认按标题和年份聚合显示结果
+                      </p>
+                    </div>
+                    <label className='flex items-center cursor-pointer'>
+                      <div className='relative'>
+                        <input
+                          type='checkbox'
+                          className='sr-only peer'
+                          checked={defaultAggregateSearch}
+                          onChange={(e) => handleAggregateToggle(e.target.checked)}
+                        />
+                        <div className='w-11 h-6 bg-gray-300 rounded-full peer-checked:bg-green-500 transition-colors dark:bg-gray-600'></div>
+                        <div className='absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5'></div>
+                      </div>
+                    </label>
+                  </div>
 
-              {/* 成功/失败提示 */}
-              {clearCacheMessage && (
-                <div className={`text-sm p-3 rounded-lg border ${
-                  clearCacheMessage.includes('成功')
-                    ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 text-green-700 dark:text-green-300'
-                    : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300'
-                }`}>
-                  {clearCacheMessage}
+                  {/* 优选和测速 */}
+                  <div className='flex items-center justify-between'>
+                    <div>
+                      <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+                        优选和测速
+                      </h4>
+                      <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+                        如出现播放器劫持问题可关闭
+                      </p>
+                    </div>
+                    <label className='flex items-center cursor-pointer'>
+                      <div className='relative'>
+                        <input
+                          type='checkbox'
+                          className='sr-only peer'
+                          checked={enableOptimization}
+                          onChange={(e) => handleOptimizationToggle(e.target.checked)}
+                        />
+                        <div className='w-11 h-6 bg-gray-300 rounded-full peer-checked:bg-green-500 transition-colors dark:bg-gray-600'></div>
+                        <div className='absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5'></div>
+                      </div>
+                    </label>
+                  </div>
+
+                  {/* 流式搜索 */}
+                  <div className='flex items-center justify-between'>
+                    <div>
+                      <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+                        流式搜索输出
+                      </h4>
+                      <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+                        启用搜索结果实时流式输出，关闭后使用传统一次性搜索
+                      </p>
+                    </div>
+                    <label className='flex items-center cursor-pointer'>
+                      <div className='relative'>
+                        <input
+                          type='checkbox'
+                          className='sr-only peer'
+                          checked={fluidSearch}
+                          onChange={(e) => handleFluidSearchToggle(e.target.checked)}
+                        />
+                        <div className='w-11 h-6 bg-gray-300 rounded-full peer-checked:bg-green-500 transition-colors dark:bg-gray-600'></div>
+                        <div className='absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5'></div>
+                      </div>
+                    </label>
+                  </div>
+
+                  {/* 直播视频浏览器直连 */}
+                  <div className='flex items-center justify-between'>
+                    <div>
+                      <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+                        IPTV 视频浏览器直连
+                      </h4>
+                      <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+                        开启 IPTV 视频浏览器直连时，需要自备 Allow CORS 插件
+                      </p>
+                    </div>
+                    <label className='flex items-center cursor-pointer'>
+                      <div className='relative'>
+                        <input
+                          type='checkbox'
+                          className='sr-only peer'
+                          checked={liveDirectConnect}
+                          onChange={(e) => handleLiveDirectConnectToggle(e.target.checked)}
+                        />
+                        <div className='w-11 h-6 bg-gray-300 rounded-full peer-checked:bg-green-500 transition-colors dark:bg-gray-600'></div>
+                        <div className='absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5'></div>
+                      </div>
+                    </label>
+                  </div>
+
+                  {/* 禁用背景图渲染 */}
+                  <div className='flex items-center justify-between'>
+                    <div>
+                      <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+                        禁用背景图渲染
+                      </h4>
+                      <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+                        关闭播放页面的TMDB背景图显示（需手动刷新页面生效）
+                      </p>
+                    </div>
+                    <label className='flex items-center cursor-pointer'>
+                      <div className='relative'>
+                        <input
+                          type='checkbox'
+                          className='sr-only peer'
+                          checked={tmdbBackdropDisabled}
+                          onChange={(e) => handleTmdbBackdropDisabledToggle(e.target.checked)}
+                        />
+                        <div className='w-11 h-6 bg-gray-300 rounded-full peer-checked:bg-green-500 transition-colors dark:bg-gray-600'></div>
+                        <div className='absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5'></div>
+                      </div>
+                    </label>
+                  </div>
+
+                  {/* 启用预告片 */}
+                  <div className='flex items-center justify-between'>
+                    <div>
+                      <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+                        首页预告片
+                      </h4>
+                      <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+                        在首页轮播图中显示视频预告片（需刷新页面生效）
+                      </p>
+                    </div>
+                    <label className='flex items-center cursor-pointer'>
+                      <div className='relative'>
+                        <input
+                          type='checkbox'
+                          className='sr-only peer'
+                          checked={enableTrailers}
+                          onChange={(e) => handleEnableTrailersToggle(e.target.checked)}
+                        />
+                        <div className='w-11 h-6 bg-gray-300 rounded-full peer-checked:bg-green-500 transition-colors dark:bg-gray-600'></div>
+                        <div className='absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5'></div>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 缓冲设置 */}
+            <div className='border border-gray-200 dark:border-gray-700 rounded-lg overflow-visible'>
+              <button
+                onClick={() => setIsBufferSectionOpen(!isBufferSectionOpen)}
+                className='w-full px-3 py-2.5 md:px-4 md:py-3 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-750 transition-colors flex items-center justify-between'
+              >
+                <h3 className='text-base font-semibold text-gray-800 dark:text-gray-200'>
+                  缓冲设置
+                </h3>
+                {isBufferSectionOpen ? (
+                  <ChevronUp className='w-5 h-5 text-gray-600 dark:text-gray-400' />
+                ) : (
+                  <ChevronDown className='w-5 h-5 text-gray-600 dark:text-gray-400' />
+                )}
+              </button>
+              {isBufferSectionOpen && (
+                <div className='p-3 md:p-4 space-y-4 md:space-y-6'>
+                  <div>
+                    <p className='text-xs text-gray-500 dark:text-gray-400'>
+                      调整播放器缓冲策略（仅在播放页面生效）
+                    </p>
+                  </div>
+
+                  {/* 缓冲策略 */}
+                  <div className='space-y-3'>
+                    <div>
+                      <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+                        缓冲策略
+                      </h4>
+                      <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+                        设置视频缓冲块大小，影响播放流畅度和流量消耗
+                      </p>
+                    </div>
+                    <div className='relative' data-dropdown='buffer-strategy'>
+                      {/* 自定义下拉选择框 */}
+                      <button
+                        type='button'
+                        onClick={() => setIsBufferStrategyDropdownOpen(!isBufferStrategyDropdownOpen)}
+                        className='w-full px-3 py-2.5 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all duration-200 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-sm hover:border-gray-400 dark:hover:border-gray-500 text-left'
+                      >
+                        {
+                          bufferStrategyOptions.find(
+                            (option) => option.value === bufferStrategy
+                          )?.label
+                        }
+                      </button>
+
+                      {/* 下拉箭头 */}
+                      <div className='absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none'>
+                        <ChevronDown
+                          className={`w-4 h-4 text-gray-400 dark:text-gray-500 transition-transform duration-200 ${isBufferStrategyDropdownOpen ? 'rotate-180' : ''
+                            }`}
+                        />
+                      </div>
+
+                      {/* 下拉选项列表 */}
+                      {isBufferStrategyDropdownOpen && (
+                        <div className='absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg max-h-60 overflow-auto'>
+                          {bufferStrategyOptions.map((option) => (
+                            <button
+                              key={option.value}
+                              type='button'
+                              onClick={() => {
+                                handleBufferStrategyChange(option.value);
+                                setIsBufferStrategyDropdownOpen(false);
+                              }}
+                              className={`w-full px-3 py-2.5 text-left text-sm transition-colors duration-150 flex items-center justify-between hover:bg-gray-100 dark:hover:bg-gray-700 ${bufferStrategy === option.value
+                                ? 'bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400'
+                                : 'text-gray-900 dark:text-gray-100'
+                                }`}
+                            >
+                              <span className='truncate'>{option.label}</span>
+                              {bufferStrategy === option.value && (
+                                <Check className='w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0 ml-2' />
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 下集预缓冲 */}
+                  <div className='flex items-center justify-between'>
+                    <div>
+                      <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+                        下集预缓冲
+                      </h4>
+                      <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+                        播放进度达到90%时，自动预缓冲下一集内容
+                      </p>
+                    </div>
+                    <label className='flex items-center cursor-pointer'>
+                      <div className='relative'>
+                        <input
+                          type='checkbox'
+                          className='sr-only peer'
+                          checked={nextEpisodePreCache}
+                          onChange={(e) => handleNextEpisodePreCacheToggle(e.target.checked)}
+                        />
+                        <div className='w-11 h-6 bg-gray-300 rounded-full peer-checked:bg-green-500 transition-colors dark:bg-gray-600'></div>
+                        <div className='absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5'></div>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 弹幕设置 */}
+            <div className='border border-gray-200 dark:border-gray-700 rounded-lg overflow-visible'>
+              <button
+                onClick={() => setIsDanmakuSectionOpen(!isDanmakuSectionOpen)}
+                className='w-full px-3 py-2.5 md:px-4 md:py-3 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-750 transition-colors flex items-center justify-between'
+              >
+                <h3 className='text-base font-semibold text-gray-800 dark:text-gray-200'>
+                  弹幕设置
+                </h3>
+                {isDanmakuSectionOpen ? (
+                  <ChevronUp className='w-5 h-5 text-gray-600 dark:text-gray-400' />
+                ) : (
+                  <ChevronDown className='w-5 h-5 text-gray-600 dark:text-gray-400' />
+                )}
+              </button>
+              {isDanmakuSectionOpen && (
+                <div className='p-3 md:p-4 space-y-4 md:space-y-6'>
+                  {/* 清除弹幕缓存 */}
+                  <div className='space-y-3'>
+                    <div>
+                      <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+                        弹幕缓存管理
+                      </h4>
+                      <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+                        清除所有已缓存的弹幕数据
+                      </p>
+                    </div>
+                    <button
+                      onClick={handleClearDanmakuCache}
+                      disabled={isClearingCache}
+                      className='w-full px-4 py-2.5 bg-red-500 hover:bg-red-600 disabled:bg-red-400 dark:bg-red-600 dark:hover:bg-red-700 dark:disabled:bg-red-500 text-white text-sm font-medium rounded-lg transition-colors duration-200 shadow-sm hover:shadow-md disabled:cursor-not-allowed flex items-center justify-center gap-2'
+                    >
+                      {isClearingCache ? (
+                        <>
+                          <div className='w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin'></div>
+                          <span>清除中...</span>
+                        </>
+                      ) : (
+                        <>
+                          <svg className='w-4 h-4' fill='none' stroke='currentColor' viewBox='0 0 24 24'>
+                            <path strokeLinecap='round' strokeLinejoin='round' strokeWidth={2} d='M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16' />
+                          </svg>
+                          <span>清除弹幕缓存</span>
+                        </>
+                      )}
+                    </button>
+
+                    {/* 成功/失败提示 */}
+                    {clearCacheMessage && (
+                      <div className={`text-sm p-3 rounded-lg border ${
+                        clearCacheMessage.includes('成功')
+                          ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 text-green-700 dark:text-green-300'
+                          : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300'
+                      }`}>
+                        {clearCacheMessage}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 首页设置 */}
+            <div className='border border-gray-200 dark:border-gray-700 rounded-lg overflow-visible'>
+              <button
+                onClick={() => setIsHomepageSectionOpen(!isHomepageSectionOpen)}
+                className='w-full px-3 py-2.5 md:px-4 md:py-3 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-750 transition-colors flex items-center justify-between'
+              >
+                <h3 className='text-base font-semibold text-gray-800 dark:text-gray-200'>
+                  首页设置
+                </h3>
+                {isHomepageSectionOpen ? (
+                  <ChevronUp className='w-5 h-5 text-gray-600 dark:text-gray-400' />
+                ) : (
+                  <ChevronDown className='w-5 h-5 text-gray-600 dark:text-gray-400' />
+                )}
+              </button>
+              {isHomepageSectionOpen && (
+                <div className='p-3 md:p-4 space-y-4 md:space-y-6'>
+                  <div>
+                    <p className='text-xs text-gray-500 dark:text-gray-400 mb-3'>
+                      配置首页模块的显示顺序和可见性
+                    </p>
+                  </div>
+
+                  {/* 模块列表 */}
+                  <div className='space-y-2'>
+                    {homeModules.map((module, index) => (
+                      <div
+                        key={module.id}
+                        className='flex items-center gap-2 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700'
+                      >
+                        {/* 左侧：显示/隐藏开关 */}
+                        <button
+                          onClick={() => handleHomeModuleToggle(module.id, !module.enabled)}
+                          className='flex-shrink-0'
+                          title={module.enabled ? '点击隐藏' : '点击显示'}
+                        >
+                          {module.enabled ? (
+                            <Eye className='w-5 h-5 text-green-600 dark:text-green-400' />
+                          ) : (
+                            <EyeOff className='w-5 h-5 text-gray-400 dark:text-gray-500' />
+                          )}
+                        </button>
+
+                        {/* 中间：模块名称 */}
+                        <div className='flex-1'>
+                          <span className={`text-sm font-medium ${
+                            module.enabled
+                              ? 'text-gray-900 dark:text-gray-100'
+                              : 'text-gray-400 dark:text-gray-500'
+                          }`}>
+                            {module.name}
+                          </span>
+                        </div>
+
+                        {/* 右侧：上下移动按钮 */}
+                        <div className='flex gap-1'>
+                          <button
+                            onClick={() => handleHomeModuleMoveUp(index)}
+                            disabled={index === 0}
+                            className='p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
+                            title='上移'
+                          >
+                            <MoveUp className='w-4 h-4 text-gray-600 dark:text-gray-400' />
+                          </button>
+                          <button
+                            onClick={() => handleHomeModuleMoveDown(index)}
+                            disabled={index === homeModules.length - 1}
+                            className='p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
+                            title='下移'
+                          >
+                            <MoveDown className='w-4 h-4 text-gray-600 dark:text-gray-400' />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* 恢复默认按钮 */}
+                  <button
+                    onClick={() => {
+                      setHomeModules(defaultHomeModules);
+                      if (typeof window !== 'undefined') {
+                        localStorage.setItem('homeModules', JSON.stringify(defaultHomeModules));
+                        window.dispatchEvent(new CustomEvent('homeModulesUpdated'));
+                      }
+                    }}
+                    className='w-full px-4 py-2 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium rounded-lg transition-colors'
+                  >
+                    恢复默认配置
+                  </button>
+
+                  {/* 提示信息 */}
+                  <div className='text-xs text-gray-500 dark:text-gray-400 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg'>
+                    <p>💡 提示：点击眼睛图标可显示/隐藏模块，使用箭头按钮调整模块顺序</p>
+                  </div>
                 </div>
               )}
             </div>

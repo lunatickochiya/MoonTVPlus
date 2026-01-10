@@ -16,6 +16,7 @@ import { DownloadProvider } from '../contexts/DownloadContext';
 import { DownloadBubble } from '../components/DownloadBubble';
 import { DownloadPanel } from '../components/DownloadPanel';
 import { DanmakuCacheCleanup } from '../components/DanmakuCacheCleanup';
+import TopProgressBar from '../components/TopProgressBar';
 
 const inter = Inter({ subsets: ['latin'] });
 export const dynamic = 'force-dynamic';
@@ -64,6 +65,7 @@ export default async function RootLayout({
   let recommendationDataSource = 'Mixed';
   let tmdbApiKey = '';
   let openListEnabled = false;
+  let embyEnabled = false;
   let loginBackgroundImage = '';
   let registerBackgroundImage = '';
   let enableRegistration = false;
@@ -77,6 +79,8 @@ export default async function RootLayout({
   let aiEnableHomepageEntry = false;
   let aiEnableVideoCardEntry = false;
   let aiEnablePlayPageEntry = false;
+  let aiDefaultMessageNoVideo = '';
+  let aiDefaultMessageWithVideo = '';
   let customCategories = [] as {
     name: string;
     type: 'movie' | 'tv';
@@ -117,12 +121,20 @@ export default async function RootLayout({
     aiEnableHomepageEntry = config.AIConfig?.EnableHomepageEntry || false;
     aiEnableVideoCardEntry = config.AIConfig?.EnableVideoCardEntry || false;
     aiEnablePlayPageEntry = config.AIConfig?.EnablePlayPageEntry || false;
+    aiDefaultMessageNoVideo = config.AIConfig?.DefaultMessageNoVideo || '';
+    aiDefaultMessageWithVideo = config.AIConfig?.DefaultMessageWithVideo || '';
     // 检查是否启用了 OpenList 功能
     openListEnabled = !!(
       config.OpenListConfig?.Enabled &&
       config.OpenListConfig?.URL &&
       config.OpenListConfig?.Username &&
       config.OpenListConfig?.Password
+    );
+    // 检查是否启用了 Emby 功能（支持多源）
+    embyEnabled = !!(
+      config.EmbyConfig?.Sources &&
+      config.EmbyConfig.Sources.length > 0 &&
+      config.EmbyConfig.Sources.some(s => s.enabled && s.ServerURL)
     );
   }
 
@@ -142,6 +154,8 @@ export default async function RootLayout({
     ENABLE_OFFLINE_DOWNLOAD: process.env.NEXT_PUBLIC_ENABLE_OFFLINE_DOWNLOAD === 'true',
     VOICE_CHAT_STRATEGY: process.env.NEXT_PUBLIC_VOICE_CHAT_STRATEGY || 'webrtc-fallback',
     OPENLIST_ENABLED: openListEnabled,
+    EMBY_ENABLED: embyEnabled,
+    PRIVATE_LIBRARY_ENABLED: openListEnabled || embyEnabled,
     LOGIN_BACKGROUND_IMAGE: loginBackgroundImage,
     REGISTER_BACKGROUND_IMAGE: registerBackgroundImage,
     ENABLE_REGISTRATION: enableRegistration,
@@ -155,6 +169,8 @@ export default async function RootLayout({
     AI_ENABLE_HOMEPAGE_ENTRY: aiEnableHomepageEntry,
     AI_ENABLE_VIDEOCARD_ENTRY: aiEnableVideoCardEntry,
     AI_ENABLE_PLAYPAGE_ENTRY: aiEnablePlayPageEntry,
+    AI_DEFAULT_MESSAGE_NO_VIDEO: aiDefaultMessageNoVideo,
+    AI_DEFAULT_MESSAGE_WITH_VIDEO: aiDefaultMessageWithVideo,
     ENABLE_SOURCE_SEARCH: process.env.NEXT_PUBLIC_ENABLE_SOURCE_SEARCH !== 'false',
   };
 
@@ -185,6 +201,7 @@ export default async function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
+          <TopProgressBar />
           <SiteProvider siteName={siteName} announcement={announcement} tmdbApiKey={tmdbApiKey}>
             <WatchRoomProvider>
               <DownloadProvider>

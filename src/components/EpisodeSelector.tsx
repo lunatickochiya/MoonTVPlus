@@ -12,7 +12,7 @@ import { Settings } from 'lucide-react';
 
 import DanmakuPanel from '@/components/DanmakuPanel';
 import EpisodeFilterSettings from '@/components/EpisodeFilterSettings';
-import type { DanmakuSelection } from '@/lib/danmaku/types';
+import type { DanmakuSelection, DanmakuComment } from '@/lib/danmaku/types';
 import { SearchResult, EpisodeFilterConfig } from '@/lib/types';
 import { getVideoResolutionFromM3u8, processImageUrl } from '@/lib/utils';
 
@@ -51,6 +51,7 @@ interface EpisodeSelectorProps {
   /** 弹幕相关 */
   onDanmakuSelect?: (selection: DanmakuSelection) => void;
   currentDanmakuSelection?: DanmakuSelection | null;
+  onUploadDanmaku?: (comments: DanmakuComment[]) => void;
   /** 观影室房员状态 - 禁用选集和换源，但保留弹幕 */
   isRoomMember?: boolean;
   /** 集数过滤配置 */
@@ -79,6 +80,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
   precomputedVideoInfo,
   onDanmakuSelect,
   currentDanmakuSelection,
+  onUploadDanmaku,
   isRoomMember = false,
   episodeFilterConfig = null,
   onFilterConfigUpdate,
@@ -270,7 +272,8 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
         !optimizationEnabled || // 若关闭测速则直接退出
         activeTab !== 'sources' ||
         availableSources.length === 0 ||
-        currentSource === 'openlist' // 私人影库不进行测速
+        currentSource === 'openlist' || // 私人影库不进行测速
+        currentSource === 'emby' // Emby 不进行测速
       )
         return;
 
@@ -305,7 +308,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
     // 当后台加载从 true 变为 false 时（即加载完成）
     if (prevBackgroundLoadingRef.current && !backgroundSourcesLoading) {
       // 如果当前选项卡在换源位置，触发测速
-      if (activeTab === 'sources' && optimizationEnabled && currentSource !== 'openlist') {
+      if (activeTab === 'sources' && optimizationEnabled && currentSource !== 'openlist' && currentSource !== 'emby') {
         // 筛选出尚未测速的播放源
         const pendingSources = availableSources.filter((source) => {
           const sourceKey = `${source.source}-${source.id}`;
@@ -575,6 +578,7 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
             currentEpisodeIndex={value - 1}
             onDanmakuSelect={onDanmakuSelect}
             currentSelection={currentDanmakuSelection || null}
+            onUploadDanmaku={onUploadDanmaku}
           />
         </div>
       )}
@@ -675,6 +679,10 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
                         if (!title) {
                           return episodeNumber;
                         }
+                        // 如果是 OVA 格式，直接返回完整标题
+                        if (title.match(/^OVA\s+\d+/i)) {
+                          return title;
+                        }
                         // 如果匹配"第X集"、"第X话"、"X集"、"X话"格式，提取中间的数字（支持小数）
                         const match = title.match(/(?:第)?(\d+(?:\.\d+)?)(?:集|话)/);
                         if (match) {
@@ -771,8 +779,8 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
                         }
                         className={`flex items-start gap-3 px-2 py-3 rounded-lg transition-all select-none duration-200 relative
                       ${isCurrentSource
-                            ? 'bg-green-500/10 dark:bg-green-500/20 border-green-500/30 border'
-                            : 'hover:bg-gray-200/50 dark:hover:bg-white/10 hover:scale-[1.02] cursor-pointer'
+                         ? 'bg-green-500/10 dark:bg-green-500/20 border-green-500/30 border'
+                          : 'hover:bg-gray-200/50 dark:hover:bg-white/10 hover:scale-[1.02] cursor-pointer'
                           }`.trim()}
                       >
                         {/* 封面 */}
@@ -847,7 +855,11 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
 
                           {/* 源名称和集数信息 - 垂直居中 */}
                           <div className='flex items-center justify-between'>
-                            <span className='text-xs px-2 py-1 border border-gray-500/60 rounded text-gray-700 dark:text-gray-300'>
+                            <span className={`text-xs px-2 py-1 border rounded text-gray-700 dark:text-gray-300 ${
+                              source.source === 'openlist' || source.source === 'emby' || source.source?.startsWith('emby_')
+                           ? 'border-yellow-500'
+                                : 'border-gray-500/60'
+                      }`}>
                               {source.source_name}
                             </span>
                             {source.episodes.length > 1 && (
@@ -888,8 +900,8 @@ const EpisodeSelector: React.FC<EpisodeSelectorProps> = ({
                             </div>
                             {/* 重新测试按钮 */}
                             {(() => {
-                              // 私人影库不显示重新测试按钮
-                              if (source.source === 'openlist') {
+                              // 私人影库和 Emby 不显示重新测试按钮
+                              if (source.source === 'openlist' || source.source === 'emby' || source.source.startsWith('emby_')) {
                                 return null;
                               }
 

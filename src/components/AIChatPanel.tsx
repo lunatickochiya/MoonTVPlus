@@ -263,16 +263,16 @@ export default function AIChatPanel({
       <div className='relative mx-4 my-auto flex h-[85vh] sm:h-[80vh] max-h-[90vh] sm:max-h-[600px] w-full max-w-3xl flex-col rounded-2xl bg-white shadow-2xl dark:bg-gray-900'>
         {/* 头部 */}
         <div className='flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700'>
-          <div className='flex items-center gap-3'>
-            <div className='flex h-10 w-10 items-center justify-center rounded-full bg-purple-500'>
+          <div className='flex items-center gap-3 min-w-0 flex-1'>
+            <div className='flex h-10 w-10 items-center justify-center rounded-full bg-purple-500 flex-shrink-0'>
               <Sparkles size={20} className='text-white' />
             </div>
-            <div>
-              <h2 className='text-lg font-semibold text-gray-900 dark:text-white'>
+            <div className='min-w-0 flex-1'>
+        <h2 className='text-lg font-semibold text-gray-900 dark:text-white'>
                 AI影视助手
               </h2>
               {context?.title && (
-                <p className='text-xs text-gray-500 dark:text-gray-400'>
+                <p className='text-xs text-gray-500 dark:text-gray-400 truncate'>
                   正在讨论: {context.title}
                   {context.year && ` (${context.year})`}
                 </p>
@@ -281,9 +281,9 @@ export default function AIChatPanel({
           </div>
           <button
             onClick={onClose}
-            className='rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
+            className='rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800 flex-shrink-0'
           >
-            <X size={20} />
+         <X size={20} />
           </button>
         </div>
 

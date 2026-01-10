@@ -43,6 +43,7 @@ export interface VideoInfo {
       season?: number;
       title?: string;
       parsed_from: 'videoinfo' | 'filename';
+      isOVA?: boolean;
     };
   };
   last_updated: number;

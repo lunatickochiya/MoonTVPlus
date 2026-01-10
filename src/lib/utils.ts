@@ -12,6 +12,14 @@ function getDoubanImageProxyConfig(): {
   | 'custom';
   proxyUrl: string;
 } {
+  // 确保在浏览器环境中执行
+  if (typeof window === 'undefined') {
+    return {
+      proxyType: 'cmliussss-cdn-tencent',
+      proxyUrl: '',
+    };
+  }
+
   const doubanImageProxyType =
     localStorage.getItem('doubanImageProxyType') ||
     (window as any).RUNTIME_CONFIG?.DOUBAN_IMAGE_PROXY_TYPE ||
@@ -27,7 +35,7 @@ function getDoubanImageProxyConfig(): {
 }
 
 /**
- * 处理图片 URL，如果设置了图片代理则使用代理
+ * 处理图片 URL，根据用户设置使用相应的代理
  */
 export function processImageUrl(originalUrl: string): string {
   if (!originalUrl) return originalUrl;
@@ -63,6 +71,64 @@ export function processImageUrl(originalUrl: string): string {
     case 'direct':
     default:
       return originalUrl;
+  }
+}
+
+/**
+ * 处理视频 URL，根据用户设置使用相应的代理
+ */
+export function processVideoUrl(originalUrl: string): string {
+  if (!originalUrl) return originalUrl;
+
+  // 仅处理豆瓣视频代理
+  if (!originalUrl.includes('doubanio.com')) {
+    return originalUrl;
+  }
+
+  // 获取用户配置的代理设置
+  const { proxyType, proxyUrl } = getDoubanImageProxyConfig();
+
+  // 根据代理类型处理URL
+  switch (proxyType) {
+    case 'direct':
+      // 直连，不使用代理
+      return originalUrl;
+
+    case 'server':
+      // 使用服务器代理
+      return `/api/video-proxy?url=${encodeURIComponent(originalUrl)}`;
+
+    case 'img3':
+      // 使用 img3.doubanio.com 代理
+      return originalUrl.replace(/img\d\.doubanio\.com/g, 'img3.doubanio.com');
+
+    case 'cmliussss-cdn-tencent':
+      // 使用腾讯云CDN代理
+      return originalUrl.replace(
+        /https?:\/\/img\d\.doubanio\.com/g,
+        'https://douban-img.cmliussss.workers.dev'
+      );
+
+    case 'cmliussss-cdn-ali':
+      // 使用阿里云CDN代理
+      return originalUrl.replace(
+        /https?:\/\/img\d\.doubanio\.com/g,
+        'https://douban-img-ali.cmliussss.workers.dev'
+      );
+
+    case 'custom':
+      // 使用自定义代理
+      if (proxyUrl) {
+        return originalUrl.replace(/https?:\/\/img\d\.doubanio\.com/g, proxyUrl);
+      }
+      return originalUrl;
+
+    default:
+      // 默认使用腾讯云CDN代理
+      return originalUrl.replace(
+        /https?:\/\/img\d\.doubanio\.com/g,
+        'https://douban-img.cmliussss.workers.dev'
+      );
   }
 }
 

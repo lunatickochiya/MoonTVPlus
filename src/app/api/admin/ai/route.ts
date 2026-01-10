@@ -61,6 +61,8 @@ export async function POST(request: NextRequest) {
       Temperature,
       MaxTokens,
       SystemPrompt,
+      DefaultMessageNoVideo,
+      DefaultMessageWithVideo,
     } = body as {
       Enabled: boolean;
       Provider: 'openai' | 'claude' | 'custom';
@@ -94,6 +96,8 @@ export async function POST(request: NextRequest) {
       Temperature?: number;
       MaxTokens?: number;
       SystemPrompt?: string;
+      DefaultMessageNoVideo?: string;
+      DefaultMessageWithVideo?: string;
     };
 
     // 参数校验
@@ -178,6 +182,8 @@ export async function POST(request: NextRequest) {
       Temperature,
       MaxTokens,
       SystemPrompt,
+      DefaultMessageNoVideo,
+      DefaultMessageWithVideo,
     };
 
     // 写入数据库

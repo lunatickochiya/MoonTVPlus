@@ -335,8 +335,24 @@ export async function getConfig(): Promise<AdminConfig> {
         await db.saveAdminConfig(adminConfig);
       }
     }
+
+    // 检查是否有旧格式Emby配置需要迁移
+    const needsEmbyMigration = adminConfig.EmbyConfig &&
+                                adminConfig.EmbyConfig.ServerURL &&
+                                !adminConfig.EmbyConfig.Sources;
+
     adminConfig = configSelfCheck(adminConfig);
     cachedConfig = adminConfig;
+
+    // 如果进行了Emby配置迁移，保存到数据库
+    if (!dbReadFailed && needsEmbyMigration) {
+      try {
+        await db.saveAdminConfig(adminConfig);
+        console.log('[Config] Emby配置迁移已保存到数据库');
+      } catch (error) {
+        console.error('[Config] 保存迁移后的配置失败:', error);
+      }
+    }
 
     // 自动迁移用户（如果配置中有用户且V2存储支持）
     // 过滤掉站长后检查是否有需要迁移的用户
@@ -475,6 +491,44 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
     seenLiveKeys.add(live.key);
     return true;
   });
+
+  // Emby配置迁移：将旧格式迁移到新格式
+  if (adminConfig.EmbyConfig) {
+    // 如果是旧格式（有ServerURL但没有Sources）
+    if (adminConfig.EmbyConfig.ServerURL && !adminConfig.EmbyConfig.Sources) {
+      console.log('[Config] 检测到旧格式Emby配置，自动迁移到新格式');
+      const oldConfig = adminConfig.EmbyConfig;
+      adminConfig.EmbyConfig = {
+        Sources: [{
+          key: 'default',
+          name: 'Emby',
+          enabled: oldConfig.Enabled ?? false,
+          ServerURL: oldConfig.ServerURL || '',
+          ApiKey: oldConfig.ApiKey,
+          Username: oldConfig.Username,
+          Password: oldConfig.Password,
+          UserId: oldConfig.UserId,
+          AuthToken: oldConfig.AuthToken,
+          Libraries: oldConfig.Libraries,
+          LastSyncTime: oldConfig.LastSyncTime,
+          ItemCount: oldConfig.ItemCount,
+          isDefault: true,
+        }],
+      };
+    }
+
+    // Emby源去重
+    if (adminConfig.EmbyConfig?.Sources) {
+      const seenEmbyKeys = new Set<string>();
+      adminConfig.EmbyConfig.Sources = adminConfig.EmbyConfig.Sources.filter((source) => {
+        if (seenEmbyKeys.has(source.key)) {
+          return false;
+        }
+        seenEmbyKeys.add(source.key);
+        return true;
+      });
+    }
+  }
 
   return adminConfig;
 }

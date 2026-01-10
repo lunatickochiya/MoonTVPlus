@@ -2766,6 +2766,7 @@ const OpenListConfigComponent = ({
   const [rootPath, setRootPath] = useState('/');
   const [offlineDownloadPath, setOfflineDownloadPath] = useState('/');
   const [scanInterval, setScanInterval] = useState(0);
+  const [scanMode, setScanMode] = useState<'torrent' | 'name' | 'hybrid'>('hybrid');
   const [videos, setVideos] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [scanProgress, setScanProgress] = useState<{
@@ -2785,6 +2786,7 @@ const OpenListConfigComponent = ({
       setRootPath(config.OpenListConfig.RootPath || '/');
       setOfflineDownloadPath(config.OpenListConfig.OfflineDownloadPath || '/');
       setScanInterval(config.OpenListConfig.ScanInterval || 0);
+      setScanMode(config.OpenListConfig.ScanMode || 'hybrid');
     }
   }, [config]);
 
@@ -2825,6 +2827,7 @@ const OpenListConfigComponent = ({
             RootPath: rootPath,
             OfflineDownloadPath: offlineDownloadPath,
             ScanInterval: scanInterval,
+            ScanMode: scanMode,
           }),
         });
 
@@ -3151,6 +3154,25 @@ const OpenListConfigComponent = ({
           </p>
         </div>
 
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            扫描模式
+          </label>
+          <select
+            value={scanMode}
+            onChange={(e) => setScanMode(e.target.value as 'torrent' | 'name' | 'hybrid')}
+            disabled={!enabled}
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed'
+          >
+            <option value='hybrid'>混合模式（推荐）</option>
+            <option value='torrent'>种子库匹配</option>
+            <option value='name'>名字匹配</option>
+          </select>
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            混合模式：先用种子库匹配，失败后降级为名字匹配
+          </p>
+        </div>
+
         <div className='flex gap-3'>
           <button
             onClick={handleCheckConnectivity}
@@ -3377,6 +3399,647 @@ const OpenListConfigComponent = ({
   );
 };
 
+// Emby 媒体库配置组件 - 多源管理版本
+const EmbyConfigComponent = ({
+  config,
+  refreshConfig,
+}: {
+  config: AdminConfig | null;
+  refreshConfig: () => Promise<void>;
+}) => {
+  const { alertModal, showAlert, hideAlert } = useAlertModal();
+  const { isLoading, withLoading } = useLoadingState();
+
+  // 源列表状态
+  const [sources, setSources] = useState<any[]>([]);
+  const [editingSource, setEditingSource] = useState<any | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+
+  // 表单状态
+  const [formData, setFormData] = useState({
+    key: '',
+    name: '',
+    enabled: true,
+    ServerURL: '',
+    ApiKey: '',
+    Username: '',
+    Password: '',
+    UserId: '',
+    isDefault: false,
+    // 高级选项
+    removeEmbyPrefix: false,
+    appendMediaSourceId: false,
+    transcodeMp4: false,
+    proxyPlay: false,
+  });
+
+  // 从配置加载源列表
+  useEffect(() => {
+    if (config?.EmbyConfig?.Sources) {
+      setSources(config.EmbyConfig.Sources);
+    } else if (config?.EmbyConfig?.ServerURL) {
+      // 兼容旧格式
+      setSources([{
+        key: 'default',
+        name: 'Emby',
+        enabled: config.EmbyConfig.Enabled || false,
+        ServerURL: config.EmbyConfig.ServerURL,
+        ApiKey: config.EmbyConfig.ApiKey,
+        Username: config.EmbyConfig.Username,
+        Password: config.EmbyConfig.Password,
+        UserId: config.EmbyConfig.UserId,
+        isDefault: true,
+      }]);
+    }
+  }, [config]);
+
+  // 重置表单
+  const resetForm = () => {
+    setFormData({
+      key: '',
+      name: '',
+      enabled: true,
+      ServerURL: '',
+      ApiKey: '',
+      Username: '',
+      Password: '',
+      UserId: '',
+      isDefault: false,
+      // 高级选项
+      removeEmbyPrefix: false,
+      appendMediaSourceId: false,
+      transcodeMp4: false,
+      proxyPlay: false,
+    });
+    setEditingSource(null);
+    setShowAddForm(false);
+  };
+
+  // 开始编辑
+  const handleEdit = (source: any) => {
+    setFormData({ ...source });
+    setEditingSource(source);
+    setShowAddForm(false);
+  };
+
+  // 开始添加
+  const handleAdd = () => {
+    resetForm();
+    setShowAddForm(true);
+  };
+
+  // 保存源（添加或更新）
+  const handleSave = async () => {
+    // 验证必填字段
+    if (!formData.key || !formData.name || !formData.ServerURL) {
+      showError('请填写必填字段：标识符、名称、服务器地址', showAlert);
+      return;
+    }
+
+    // 验证key唯一性
+    if (!editingSource && sources.some(s => s.key === formData.key)) {
+      showError('标识符已存在，请使用其他标识符', showAlert);
+      return;
+    }
+
+    await withLoading('saveEmbySource', async () => {
+      try {
+        let newSources;
+        if (editingSource) {
+          // 更新现有源
+          newSources = sources.map(s =>
+            s.key === editingSource.key ? formData : s
+          );
+        } else {
+          // 添加新源
+          newSources = [...sources, formData];
+        }
+
+        // 保存到配置
+        const response = await fetch('/api/admin/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...config,
+            EmbyConfig: {
+              Sources: newSources,
+            },
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error('保存失败');
+        }
+
+        await refreshConfig();
+        resetForm();
+        showSuccess(editingSource ? '更新成功' : '添加成功', showAlert);
+      } catch (error) {
+        showError(error instanceof Error ? error.message : '保存失败', showAlert);
+      }
+    });
+  };
+
+  // 删除源
+  const handleDelete = async (source: any) => {
+    if (sources.length === 1) {
+      showError('至少需要保留一个Emby源', showAlert);
+      return;
+    }
+
+    if (!confirm(`确定要删除 "${source.name}" 吗？`)) {
+      return;
+    }
+
+    await withLoading('deleteEmbySource', async () => {
+      try {
+        const newSources = sources.filter(s => s.key !== source.key);
+
+        const response = await fetch('/api/admin/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...config,
+            EmbyConfig: {
+              Sources: newSources,
+            },
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error('删除失败');
+        }
+
+        await refreshConfig();
+        showSuccess('删除成功', showAlert);
+      } catch (error) {
+        showError(error instanceof Error ? error.message : '删除失败', showAlert);
+      }
+    });
+  };
+
+  // 切换启用状态
+  const handleToggleEnabled = async (source: any) => {
+    await withLoading('toggleEmbySource', async () => {
+      try {
+        const newSources = sources.map(s =>
+          s.key === source.key ? { ...s, enabled: !s.enabled } : s
+        );
+
+        const response = await fetch('/api/admin/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...config,
+            EmbyConfig: {
+              Sources: newSources,
+            },
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error('更新失败');
+        }
+
+        await refreshConfig();
+        showSuccess(source.enabled ? '已禁用' : '已启用', showAlert);
+      } catch (error) {
+        showError(error instanceof Error ? error.message : '更新失败', showAlert);
+      }
+    });
+  };
+
+  // 测试连接
+  const handleTest = async (source: any) => {
+    await withLoading('testEmbySource', async () => {
+      try {
+        const response = await fetch('/api/admin/emby', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'test',
+            ServerURL: source.ServerURL,
+            ApiKey: source.ApiKey,
+            Username: source.Username,
+            Password: source.Password,
+          }),
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+          showSuccess(data.message || 'Emby 连接测试成功', showAlert);
+        } else {
+          showError(data.message || 'Emby 连接测试失败', showAlert);
+        }
+      } catch (error) {
+        showError(error instanceof Error ? error.message : '测试失败', showAlert);
+      }
+    });
+  };
+
+  // 清除缓存
+  const handleClearCache = async () => {
+    await withLoading('clearEmbyCache', async () => {
+      try {
+        const response = await fetch('/api/admin/emby', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'clearCache',
+          }),
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+          showSuccess(data.message || '缓存清除成功', showAlert);
+        } else {
+          showError(data.message || '缓存清除失败', showAlert);
+        }
+      } catch (error) {
+        showError(error instanceof Error ? error.message : '缓存清除失败', showAlert);
+      }
+    });
+  };
+
+  return (
+    <div className='space-y-6'>
+      <AlertModal
+        isOpen={alertModal.isOpen}
+        onClose={hideAlert}
+        type={alertModal.type}
+        title={alertModal.title}
+        message={alertModal.message}
+        timer={alertModal.timer}
+        showConfirm={alertModal.showConfirm}
+        onConfirm={alertModal.onConfirm}
+      />
+
+      {/* 源列表 */}
+      <div className='space-y-4'>
+        <div className='flex items-center justify-between'>
+          <h3 className='text-lg font-medium text-gray-900 dark:text-gray-100'>
+            Emby 源列表 ({sources.length})
+          </h3>
+          <button
+            onClick={handleAdd}
+            className={buttonStyles.success}
+          >
+            添加新源
+          </button>
+        </div>
+
+        {sources.length === 0 ? (
+          <div className='text-center py-8 text-gray-500 dark:text-gray-400'>
+            暂无Emby源，点击"添加新源"开始配置
+          </div>
+        ) : (
+          sources.map((source) => (
+            <div
+              key={source.key}
+              className='border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800'
+            >
+              <div className='flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3'>
+                <div className='flex-1'>
+                  <div className='flex items-center gap-3 flex-wrap'>
+                    <h4 className='text-base font-medium text-gray-900 dark:text-gray-100'>
+                      {source.name}
+                    </h4>
+                    {source.isDefault && (
+                      <span className='px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200 rounded'>
+                        默认
+                      </span>
+                    )}
+                    <span
+                      className={`px-2 py-0.5 text-xs font-medium rounded ${
+                        source.enabled
+                          ? 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200'
+                          : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'
+                      }`}
+                    >
+                      {source.enabled ? '已启用' : '已禁用'}
+                    </span>
+                  </div>
+                  <p className='mt-1 text-sm text-gray-600 dark:text-gray-400'>
+                    标识符: {source.key}
+                  </p>
+                  <p className='mt-1 text-sm text-gray-600 dark:text-gray-400'>
+                    服务器: {source.ServerURL}
+                  </p>
+                  {source.UserId && (
+                    <p className='mt-1 text-sm text-gray-600 dark:text-gray-400'>
+                      用户ID: {source.UserId}
+                    </p>
+                  )}
+                </div>
+                <div className='flex gap-2 flex-wrap sm:flex-nowrap'>
+                  <button
+                    onClick={() => handleToggleEnabled(source)}
+                    disabled={isLoading('toggleEmbySource')}
+                    className={source.enabled ? buttonStyles.warningSmall : buttonStyles.successSmall}
+                  >
+                    {source.enabled ? '禁用' : '启用'}
+                  </button>
+                  <button
+                    onClick={() => handleTest(source)}
+                    disabled={isLoading('testEmbySource')}
+                    className={buttonStyles.primarySmall}
+                  >
+                    测试
+                  </button>
+                  <button
+                    onClick={() => handleEdit(source)}
+                    className={buttonStyles.primarySmall}
+                  >
+                    编辑
+                  </button>
+                  <button
+                    onClick={() => handleDelete(source)}
+                    disabled={isLoading('deleteEmbySource')}
+                    className={buttonStyles.dangerSmall}
+                  >
+                    删除
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* 添加/编辑表单 */}
+      {(showAddForm || editingSource) && (
+        <div className='border border-gray-200 dark:border-gray-700 rounded-lg p-6 bg-gray-50 dark:bg-gray-800/50'>
+          <h3 className='text-lg font-medium text-gray-900 dark:text-gray-100 mb-4'>
+            {editingSource ? '编辑 Emby 源' : '添加新的 Emby 源'}
+          </h3>
+
+          <div className='space-y-4'>
+            {/* 标识符 */}
+            <div>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+                标识符 *
+              </label>
+              <input
+                type='text'
+                value={formData.key}
+                onChange={(e) => setFormData({ ...formData, key: e.target.value })}
+                disabled={!!editingSource}
+                placeholder='home, office, etc.'
+                className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 disabled:bg-gray-100 dark:disabled:bg-gray-700'
+              />
+              <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+                唯一标识符，只能包含字母、数字、下划线，创建后不可修改
+              </p>
+            </div>
+
+            {/* 名称 */}
+            <div>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+                显示名称 *
+              </label>
+              <input
+                type='text'
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                placeholder='家庭Emby, 公司Emby, etc.'
+                className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+              />
+            </div>
+
+            {/* 服务器地址 */}
+            <div>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+                Emby 服务器地址 *
+              </label>
+              <input
+                type='text'
+                value={formData.ServerURL}
+                onChange={(e) => setFormData({ ...formData, ServerURL: e.target.value })}
+                placeholder='http://192.168.1.100:8096'
+                className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+              />
+            </div>
+
+            {/* API Key */}
+            <div>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+                API Key（推荐）
+              </label>
+              <input
+                type='password'
+                value={formData.ApiKey}
+                onChange={(e) => setFormData({ ...formData, ApiKey: e.target.value })}
+                placeholder='输入 Emby API Key'
+                className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+              />
+              <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+                推荐使用 API Key 认证。如果不使用 API Key，请填写下方的用户名和密码。
+              </p>
+            </div>
+
+            {/* 用户名 */}
+            <div>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+                用户名（可选）
+              </label>
+              <input
+                type='text'
+                value={formData.Username}
+                onChange={(e) => setFormData({ ...formData, Username: e.target.value })}
+                placeholder='Emby 用户名'
+                className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+              />
+            </div>
+
+            {/* 密码 */}
+            <div>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+                密码（可选）
+              </label>
+              <input
+                type='password'
+                value={formData.Password}
+                onChange={(e) => setFormData({ ...formData, Password: e.target.value })}
+                placeholder='Emby 密码'
+                className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+              />
+            </div>
+
+            {/* 用户 ID */}
+            <div>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+                用户 ID（使用 API Key 时必填）
+              </label>
+              <input
+                type='text'
+                value={formData.UserId}
+                onChange={(e) => setFormData({ ...formData, UserId: e.target.value })}
+                placeholder='aab507c58e874de6a9bd12388d72f4d2'
+                className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+              />
+              <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+                从你的 Emby 抓包数据中获取用户 ID，通常在 URL 中如 /Users/[userId]/...
+              </p>
+            </div>
+
+            {/* 启用开关 */}
+            <div className='flex items-center justify-between'>
+              <label className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+                启用此源
+              </label>
+              <button
+                onClick={() => setFormData({ ...formData, enabled: !formData.enabled })}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  formData.enabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    formData.enabled ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {/* 高级选项 */}
+            <div className='border-t border-gray-200 dark:border-gray-700 pt-4 mt-4'>
+              <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300 mb-3'>
+                高级选项
+              </h4>
+
+              {/* 选项1: 播放链接移除/emby前缀 */}
+              <div className='flex items-center justify-between mb-3'>
+                <div className='flex-1'>
+                  <label className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+                    播放链接移除/emby前缀
+                  </label>
+                  <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+                    启用后将从播放链接中移除 /emby 前缀
+                  </p>
+                </div>
+                <button
+                  onClick={() => setFormData({ ...formData, removeEmbyPrefix: !formData.removeEmbyPrefix })}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                    formData.removeEmbyPrefix ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      formData.removeEmbyPrefix ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {/* 选项2: 拼接MediaSourceId参数 */}
+              <div className='flex items-center justify-between mb-3'>
+                <div className='flex-1'>
+                  <label className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+                    拼接MediaSourceId参数
+                  </label>
+                  <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+                    启用后将调用 PlaybackInfo API 获取 MediaSourceId 并添加到播放链接
+                  </p>
+                </div>
+                <button
+                  onClick={() => setFormData({ ...formData, appendMediaSourceId: !formData.appendMediaSourceId })}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                    formData.appendMediaSourceId ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      formData.appendMediaSourceId ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {/* 选项3: 转码mp4 */}
+              <div className='flex items-center justify-between mb-3'>
+                <div className='flex-1'>
+                  <label className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+                    转码mp4
+                  </label>
+                  <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+                    启用后将使用 stream.mp4 格式并移除 Static 参数
+                  </p>
+                </div>
+                <button
+                  onClick={() => setFormData({ ...formData, transcodeMp4: !formData.transcodeMp4 })}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                    formData.transcodeMp4 ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      formData.transcodeMp4 ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {/* 视频播放代理开关 */}
+              <div className='flex items-center justify-between py-3 border-b border-gray-200 dark:border-gray-700'>
+                <div className='flex-1'>
+                  <h4 className='text-sm font-medium text-gray-900 dark:text-white'>
+                    视频播放代理
+                  </h4>
+                  <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+                    启用后视频播放将通过服务器代理
+                  </p>
+                </div>
+                <button
+                  onClick={() => setFormData({ ...formData, proxyPlay: !formData.proxyPlay })}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                    formData.proxyPlay ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      formData.proxyPlay ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+            </div>
+            </div>
+
+            {/* 操作按钮 */}
+            <div className='flex gap-3 pt-4'>
+              <button
+                onClick={handleSave}
+                disabled={isLoading('saveEmbySource')}
+                className={buttonStyles.success}
+              >
+                {isLoading('saveEmbySource') ? '保存中...' : '保存'}
+              </button>
+              <button
+                onClick={resetForm}
+                className={buttonStyles.secondary}
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 全局操作 */}
+      <div className='flex gap-3 pt-4 border-t border-gray-200 dark:border-gray-700'>
+        <button
+          onClick={handleClearCache}
+          disabled={isLoading('clearEmbyCache')}
+          className={buttonStyles.warning}
+        >
+          {isLoading('clearEmbyCache') ? '清除中...' : '清除所有缓存'}
+        </button>
+      </div>
+    </div>
+  );
+};
+
 // 视频源配置组件
 const VideoSourceConfig = ({
   config,
@@ -3478,8 +4141,14 @@ const VideoSourceConfig = ({
         throw new Error(data.error || `操作失败: ${resp.status}`);
       }
 
+      // 获取响应数据
+      const data = await resp.json();
+
       // 成功后刷新配置
       await refreshConfig();
+
+      // 返回响应数据供调用者使用
+      return data;
     } catch (err) {
       showError(err instanceof Error ? err.message : '操作失败', showAlert);
       throw err; // 向上抛出方便调用处判断
@@ -3983,15 +4652,44 @@ const VideoSourceConfig = ({
       message: confirmMessage,
       onConfirm: async () => {
         try {
-          await withLoading(`batchSource_${action}`, () =>
+          const result = await withLoading(`batchSource_${action}`, () =>
             callSourceApi({ action, keys })
           );
-          showAlert({
-            type: 'success',
-            title: `${actionName}成功`,
-            message: `${actionName}了 ${keys.length} 个视频源`,
-            timer: 2000,
-          });
+
+          // 根据操作类型和结果显示不同的消息
+          if (action === 'batch_delete' && result?.deleted !== undefined && result?.skipped !== undefined) {
+            const { deleted, skipped } = result;
+            if (skipped > 0) {
+              showAlert({
+                type: 'warning',
+                title: '批量删除完成',
+                message: `成功删除了 ${deleted} 个视频源，跳过了 ${skipped} 个配置文件中的源（不可删除）`,
+                timer: 3000,
+              });
+            } else if (deleted > 0) {
+              showAlert({
+                type: 'success',
+                title: '批量删除成功',
+                message: `成功删除了 ${deleted} 个视频源`,
+                timer: 2000,
+              });
+            } else {
+              showAlert({
+                type: 'warning',
+                title: '无法删除',
+                message: '所选视频源均为配置文件中的源，不可删除',
+                timer: 3000,
+              });
+            }
+          } else {
+            showAlert({
+              type: 'success',
+              title: `${actionName}成功`,
+              message: `${actionName}了 ${keys.length} 个视频源`,
+              timer: 2000,
+            });
+          }
+
           // 重置选择状态
           setSelectedSources(new Set());
         } catch (err) {
@@ -5184,7 +5882,7 @@ const ConfigFileComponent = ({
   );
 };
 
-// 主题配置组件
+// 个性化配置组件
 const ThemeConfigComponent = ({
   config,
   refreshConfig,
@@ -5295,7 +5993,7 @@ const ThemeConfigComponent = ({
         showAlert({
           type: 'success',
           title: '保存成功',
-          message: '主题配置已更新',
+             message: '个性化配置已更新',
           timer: 2000,
         });
 
@@ -5654,7 +6352,7 @@ const ThemeConfigComponent = ({
               : buttonStyles.success
           }
         >
-          {isLoading('saveThemeConfig') ? '保存中...' : '保存主题配置'}
+          {isLoading('saveThemeConfig') ? '保存中...' : '保存个性化配置'}
         </button>
       </div>
 
@@ -5698,7 +6396,7 @@ const SiteConfigComponent = ({
     DanmakuApiToken: '87654321',
     TMDBApiKey: '',
     TMDBProxy: '',
-    BannerDataSource: 'TMDB',
+    BannerDataSource: 'Douban',
     RecommendationDataSource: 'Mixed',
     PansouApiUrl: '',
     PansouUsername: '',
@@ -5740,15 +6438,15 @@ const SiteConfigComponent = ({
 
   // 豆瓣图片代理选项
   const doubanImageProxyTypeOptions = [
-    { value: 'direct', label: '直连（浏览器直接请求豆瓣）' },
     { value: 'server', label: '服务器代理（由服务器代理请求豆瓣）' },
-    { value: 'img3', label: '豆瓣官方精品 CDN（阿里云）' },
     {
       value: 'cmliussss-cdn-tencent',
       label: '豆瓣 CDN By CMLiussss（腾讯云）',
     },
     { value: 'cmliussss-cdn-ali', label: '豆瓣 CDN By CMLiussss（阿里云）' },
     { value: 'custom', label: '自定义代理' },
+    { value: 'direct', label: '直连（浏览器直接请求豆瓣，可能需要浏览器插件才能正常显示）' },
+    { value: 'img3', label: '豆瓣官方精品 CDN（阿里云，可能需要浏览器插件才能正常显示）' },
   ];
 
   // 获取感谢信息
@@ -5787,7 +6485,8 @@ const SiteConfigComponent = ({
         DanmakuApiToken: config.SiteConfig.DanmakuApiToken || '87654321',
         TMDBApiKey: config.SiteConfig.TMDBApiKey || '',
         TMDBProxy: config.SiteConfig.TMDBProxy || '',
-        BannerDataSource: config.SiteConfig.BannerDataSource || 'TMDB',
+        BannerDataSource: config.SiteConfig.BannerDataSource || 'Douban',
+        RecommendationDataSource: config.SiteConfig.RecommendationDataSource || 'Mixed',
         PansouApiUrl: config.SiteConfig.PansouApiUrl || '',
         PansouUsername: config.SiteConfig.PansouUsername || '',
         PansouPassword: config.SiteConfig.PansouPassword || '',
@@ -6269,7 +6968,7 @@ const SiteConfigComponent = ({
           轮播图数据源
         </label>
         <select
-          value={siteSettings.BannerDataSource || 'TMDB'}
+          value={siteSettings.BannerDataSource || 'Douban'}
           onChange={(e) =>
             setSiteSettings((prev) => ({
               ...prev,
@@ -6278,6 +6977,7 @@ const SiteConfigComponent = ({
           }
           className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
         >
+          <option value='Douban'>豆瓣</option>
           <option value='TMDB'>TMDB</option>
           <option value='TX'>TX</option>
         </select>
@@ -7684,6 +8384,10 @@ const AIConfigComponent = ({
   const [maxTokens, setMaxTokens] = useState(1000);
   const [systemPrompt, setSystemPrompt] = useState('');
 
+  // AI默认消息配置
+  const [defaultMessageNoVideo, setDefaultMessageNoVideo] = useState('');
+  const [defaultMessageWithVideo, setDefaultMessageWithVideo] = useState('');
+
   // 从配置加载数据
   useEffect(() => {
     if (config?.AIConfig) {
@@ -7704,6 +8408,8 @@ const AIConfigComponent = ({
       setTemperature(config.AIConfig.Temperature ?? 0.7);
       setMaxTokens(config.AIConfig.MaxTokens ?? 1000);
       setSystemPrompt(config.AIConfig.SystemPrompt || '');
+      setDefaultMessageNoVideo(config.AIConfig.DefaultMessageNoVideo || '');
+      setDefaultMessageWithVideo(config.AIConfig.DefaultMessageWithVideo || '');
     }
   }, [config]);
 
@@ -7734,6 +8440,8 @@ const AIConfigComponent = ({
             Temperature: temperature,
             MaxTokens: maxTokens,
             SystemPrompt: systemPrompt,
+            DefaultMessageNoVideo: defaultMessageNoVideo,
+            DefaultMessageWithVideo: defaultMessageWithVideo,
           }),
         });
 
@@ -8093,6 +8801,46 @@ const AIConfigComponent = ({
               placeholder='可自定义AI的角色和行为规则...'
               className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100'
             />
+          </div>
+        </div>
+    </details>
+
+      {/* AI默认消息配置 */}
+      <details className='p-4 border border-gray-200 dark:border-gray-700 rounded-lg'>
+        <summary className='text-sm font-semibold text-gray-900 dark:text-gray-100 cursor-pointer'>
+          默认消息配置 (可选)
+        </summary>
+        <div className='mt-4 space-y-4'>
+          <div>
+            <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+              无视频时的默认消息
+            </label>
+            <textarea
+              value={defaultMessageNoVideo}
+              onChange={(e) => setDefaultMessageNoVideo(e.target.value)}
+              rows={3}
+              placeholder='例如：你好！我是MoonTVPlus的AI影视助手。想看什么电影或剧集？需要推荐吗？'
+              className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100'
+            />
+            <p className='mt-2 text-sm text-gray-600 dark:text-gray-400'>
+              当用户在首页或没有视频上下文时打开AI问片，将显示此默认消息
+            </p>
+          </div>
+
+          <div>
+            <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+              有视频时的默认消息
+            </label>
+            <textarea
+              value={defaultMessageWithVideo}
+              onChange={(e) => setDefaultMessageWithVideo(e.target.value)}
+              rows={3}
+              placeholder='例如：你好！我看到你正在浏览《{title}》，有什么想了解的吗？'
+              className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100'
+            />
+            <p className='mt-2 text-sm text-gray-600 dark:text-gray-400'>
+              当用户在视频卡片或播放页打开AI问片时，将显示此默认消息。支持使用 <code className='px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs font-mono'>{'{title}'}</code> 替换符来显示片名
+            </p>
           </div>
         </div>
       </details>
@@ -8757,6 +9505,7 @@ function AdminPageClient() {
     userConfig: false,
     videoSource: false,
     openListConfig: false,
+    embyConfig: false,
     aiConfig: false,
     liveSource: false,
     siteConfig: false,
@@ -8996,9 +9745,9 @@ function AdminPageClient() {
             <RegistrationConfigComponent config={config} refreshConfig={fetchConfig} />
           </CollapsibleTab>
 
-          {/* 主题配置标签 */}
+          {/* 个性化配置标签 */}
           <CollapsibleTab
-            title='主题配置'
+            title='个性化配置'
             icon={
               <Palette
                 size={20}
@@ -9068,6 +9817,18 @@ function AdminPageClient() {
               onToggle={() => toggleTab('openListConfig')}
             >
               <OpenListConfigComponent config={config} refreshConfig={fetchConfig} />
+            </CollapsibleTab>
+
+            {/* Emby 媒体库标签 */}
+            <CollapsibleTab
+              title='Emby 媒体库'
+              icon={
+                <FolderOpen size={20} className='text-gray-600 dark:text-gray-400' />
+              }
+              isExpanded={expandedTabs.embyConfig}
+              onToggle={() => toggleTab('embyConfig')}
+            >
+              <EmbyConfigComponent config={config} refreshConfig={fetchConfig} />
             </CollapsibleTab>
 
             {/* AI配置标签 */}
