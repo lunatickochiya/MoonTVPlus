@@ -99,17 +99,6 @@ export async function GET(request: NextRequest) {
       // 处理返回数据，替换播放链接为代理链接
       const processedData = processPlayUrls(data, origin);
 
-      // 输出处理后的第一个视频的播放信息（用于调试）
-      if (processedData.list && processedData.list.length > 0) {
-        const firstItem = processedData.list[0];
-        console.log('第一个视频处理后的播放信息:', {
-          vod_name: firstItem.vod_name,
-          vod_play_from: firstItem.vod_play_from,
-          vod_play_url_length: firstItem.vod_play_url?.length || 0,
-          vod_play_url_preview: firstItem.vod_play_url?.substring(0, 200) || '',
-        });
-      }
-
       return NextResponse.json(processedData, {
         headers: {
           'Content-Type': 'application/json; charset=utf-8',
@@ -279,14 +268,14 @@ async function handleOpenListProxy(request: NextRequest) {
   );
 
   // 读取 metainfo (从数据库或缓存)
-  let metaInfo: MetaInfo | null = getCachedMetaInfo(rootPath);
+  let metaInfo: MetaInfo | null = getCachedMetaInfo();
 
   if (!metaInfo) {
     try {
       const metainfoJson = await db.getGlobalValue('video.metainfo');
       if (metainfoJson) {
         metaInfo = JSON.parse(metainfoJson) as MetaInfo;
-        setCachedMetaInfo(rootPath, metaInfo);
+        setCachedMetaInfo(metaInfo);
       }
     } catch (error) {
       return NextResponse.json(

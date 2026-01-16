@@ -90,8 +90,8 @@ const MobileBottomNav = ({ activePath }: MobileBottomNavProps) => {
       },
     ];
 
-    // 如果配置了 OpenList，添加私人影库入口
-    if (runtimeConfig?.OPENLIST_ENABLED) {
+    // 如果配置了 OpenList 或 Emby，添加私人影库入口
+    if (runtimeConfig?.PRIVATE_LIBRARY_ENABLED) {
       items.push({
         icon: FolderOpen,
         label: '私人影库',

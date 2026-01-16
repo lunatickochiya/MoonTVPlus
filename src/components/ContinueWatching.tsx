@@ -2,6 +2,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { AlertTriangle } from 'lucide-react';
 
 import type { PlayRecord } from '@/lib/db.client';
 import {
@@ -22,6 +24,7 @@ export default function ContinueWatching({ className }: ContinueWatchingProps) {
     (PlayRecord & { key: string })[]
   >([]);
   const [loading, setLoading] = useState(true);
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
 
   // 处理播放记录数据更新的函数
   const updatePlayRecords = (allRecords: Record<string, PlayRecord>) => {
@@ -85,24 +88,29 @@ export default function ContinueWatching({ className }: ContinueWatchingProps) {
     return { source, id };
   };
 
+  // 处理清空确认
+  const handleClearConfirm = async () => {
+    await clearAllPlayRecords();
+    setPlayRecords([]);
+    setShowConfirmDialog(false);
+  };
+
   return (
-    <section className={`mb-8 ${className || ''}`}>
-      <div className='mb-4 flex items-center justify-between'>
-        <h2 className='text-xl font-bold text-gray-800 dark:text-gray-200'>
-          继续观看
-        </h2>
-        {!loading && playRecords.length > 0 && (
-          <button
-            className='text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-            onClick={async () => {
-              await clearAllPlayRecords();
-              setPlayRecords([]);
-            }}
-          >
-            清空
-          </button>
-        )}
-      </div>
+    <>
+      <section className={`mb-8 ${className || ''}`}>
+        <div className='mb-4 flex items-center justify-between'>
+          <h2 className='text-xl font-bold text-gray-800 dark:text-gray-200'>
+            继续观看
+          </h2>
+          {!loading && playRecords.length > 0 && (
+            <button
+              className='text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+              onClick={() => setShowConfirmDialog(true)}
+            >
+              清空
+            </button>
+          )}
+        </div>
       {loading ? (
         // 加载状态显示灰色占位数据（使用原始 ScrollableRow）
         <div className="flex gap-2 overflow-x-auto scrollbar-hide">
@@ -158,5 +166,53 @@ export default function ContinueWatching({ className }: ContinueWatchingProps) {
         </VirtualScrollableRow>
       )}
     </section>
+
+    {/* 确认对话框 */}
+    {showConfirmDialog && createPortal(
+      <div
+        className='fixed inset-0 bg-black bg-opacity-50 z-[9999] flex items-center justify-center p-4 transition-opacity duration-300'
+        onClick={() => setShowConfirmDialog(false)}
+      >
+        <div
+          className='bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full border border-red-200 dark:border-red-800 transition-all duration-300'
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="p-6">
+            {/* 图标和标题 */}
+            <div className="flex items-start gap-4 mb-4">
+              <div className="flex-shrink-0">
+                <AlertTriangle className="w-8 h-8 text-red-500" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
+                  清空播放记录
+                </h3>
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  确定要清空所有播放记录吗？此操作不可恢复。
+                </p>
+              </div>
+            </div>
+
+            {/* 按钮组 */}
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => setShowConfirmDialog(false)}
+                className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleClearConfirm}
+                className="flex-1 px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors"
+              >
+                确定清空
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>,
+      document.body
+    )}
+  </>
   );
 }

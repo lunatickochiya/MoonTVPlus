@@ -22,7 +22,7 @@ export interface AdminConfig {
     // TMDB配置
     TMDBApiKey?: string;
     TMDBProxy?: string;
-    BannerDataSource?: string; // 轮播图数据源：TMDB 或 TX
+    BannerDataSource?: string; // 轮播图数据源：TMDB、TX 或 Douban
     RecommendationDataSource?: string; // 更多推荐数据源：Douban、TMDB、Mixed、MixedSmart
     // Pansou配置
     PansouApiUrl?: string;
@@ -40,6 +40,9 @@ export interface AdminConfig {
     TurnstileSiteKey?: string; // Cloudflare Turnstile Site Key
     TurnstileSecretKey?: string; // Cloudflare Turnstile Secret Key
     DefaultUserTags?: string[]; // 新注册用户的默认用户组
+    // 求片功能配置
+    EnableMovieRequest?: boolean; // 启用求片功能
+    MovieRequestCooldown?: number; // 求片冷却时间（秒），默认3600
     // OIDC配置
     EnableOIDCLogin?: boolean; // 启用OIDC登录
     EnableOIDCRegistration?: boolean; // 启用OIDC注册
@@ -106,11 +109,14 @@ export interface AdminConfig {
     URL: string; // OpenList 服务器地址
     Username: string; // 账号（用于登录获取Token）
     Password: string; // 密码（用于登录获取Token）
-    RootPath: string; // 根目录路径，默认 "/"
+    RootPath?: string; // 旧字段：根目录路径（向后兼容，迁移后删除）
+    RootPaths?: string[]; // 新字段：多根目录路径列表
     OfflineDownloadPath: string; // 离线下载目录，默认 "/"
     LastRefreshTime?: number; // 上次刷新时间戳
     ResourceCount?: number; // 资源数量
     ScanInterval?: number; // 定时扫描间隔（分钟），0表示关闭，最低60分钟
+    ScanMode?: 'torrent' | 'name' | 'hybrid'; // 扫描模式：torrent=种子库匹配，name=名字匹配，hybrid=混合模式（默认）
+    DisableVideoPreview?: boolean; // 禁用预览视频，直接返回直连链接
   };
   AIConfig?: {
     Enabled: boolean; // 是否启用AI问片功能
@@ -153,6 +159,52 @@ export interface AdminConfig {
     Temperature?: number; // AI温度参数（0-2），默认0.7
     MaxTokens?: number; // 最大回复token数，默认1000
     SystemPrompt?: string; // 自定义系统提示词
+    EnableStreaming?: boolean; // 是否启用流式响应，默认true
+    // AI问片默认消息配置
+    DefaultMessageNoVideo?: string; // 无视频时的默认消息
+    DefaultMessageWithVideo?: string; // 有视频时的默认消息（支持 {title} 替换符）
+  };
+  EmbyConfig?: {
+    // 新格式：多源配置（推荐）
+    Sources?: Array<{
+      key: string; // 唯一标识，如 'emby1', 'emby2'
+      name: string; // 显示名称，如 '家庭Emby', '公司Emby'
+      enabled: boolean; // 是否启用
+      ServerURL: string; // Emby服务器地址
+      ApiKey?: string; // API Key（推荐方式）
+      Username?: string; // 用户名（或使用API Key）
+      Password?: string; // 密码
+      UserId?: string; // 用户ID（登录后获取）
+      AuthToken?: string; // 认证令牌（用户名密码登录后获取）
+      Libraries?: string[]; // 要显示的媒体库ID（可选，默认全部）
+      LastSyncTime?: number; // 最后同步时间戳
+      ItemCount?: number; // 媒体项数量
+      isDefault?: boolean; // 是否为默认源（用于向后兼容）
+      // 高级流媒体选项
+      removeEmbyPrefix?: boolean; // 播放链接移除/emby前缀
+      appendMediaSourceId?: boolean; // 拼接MediaSourceId参数
+      transcodeMp4?: boolean; // 转码mp4
+      proxyPlay?: boolean; // 视频播放代理开关
+    }>;
+    // 旧格式：单源配置（向后兼容）
+    Enabled?: boolean;
+    ServerURL?: string;
+    ApiKey?: string;
+    Username?: string;
+    Password?: string;
+    UserId?: string;
+    AuthToken?: string;
+    Libraries?: string[];
+    LastSyncTime?: number;
+    ItemCount?: number;
+  };
+  XiaoyaConfig?: {
+    Enabled: boolean; // 是否启用
+    ServerURL: string; // Alist 服务器地址
+    Token?: string; // Token 认证（推荐）
+    Username?: string; // 用户名认证（备选）
+    Password?: string; // 密码认证（备选）
+    DisableVideoPreview?: boolean; // 禁用预览视频，直接返回直连链接
   };
 }
 

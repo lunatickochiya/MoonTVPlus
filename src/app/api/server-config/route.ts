@@ -6,6 +6,7 @@ import { getConfig } from '@/lib/config';
 import { CURRENT_VERSION } from '@/lib/version'
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic'; // 禁用缓存
 
 export async function GET(request: NextRequest) {
   console.log('server-config called: ', request.url);
@@ -54,6 +55,8 @@ export async function GET(request: NextRequest) {
     AIEnableHomepageEntry: config.AIConfig?.EnableHomepageEntry || false,
     AIEnableVideoCardEntry: config.AIConfig?.EnableVideoCardEntry || false,
     AIEnablePlayPageEntry: config.AIConfig?.EnablePlayPageEntry || false,
+    AIDefaultMessageNoVideo: config.AIConfig?.DefaultMessageNoVideo || '',
+    AIDefaultMessageWithVideo: config.AIConfig?.DefaultMessageWithVideo || '',
   };
   return NextResponse.json(result);
 }
