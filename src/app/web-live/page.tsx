@@ -141,6 +141,9 @@ export default function WebLivePage() {
     if (source.platform === 'bilibili') {
       return `https://live.bilibili.com/${source.roomId}`;
     }
+    if (source.platform === 'douyin') {
+      return `https://live.douyin.com/${source.roomId}`;
+    }
     return '';
   };
 
@@ -502,7 +505,7 @@ export default function WebLivePage() {
                         <div className='flex items-center gap-2'>
                           <span className='text-xs text-green-700 dark:text-green-300'>筛选平台:</span>
                           <span className='text-sm font-medium text-green-800 dark:text-green-200'>
-                            {selectedPlatform === 'huya' ? '虎牙' : selectedPlatform === 'bilibili' ? '哔哩哔哩' : selectedPlatform}
+                            {selectedPlatform === 'huya' ? '虎牙' : selectedPlatform === 'bilibili' ? '哔哩哔哩' : selectedPlatform === 'douyin' ? '抖音' : selectedPlatform}
                           </span>
                         </div>
                         <button
@@ -562,13 +565,15 @@ export default function WebLivePage() {
                                 <img src='https://hd.huya.com/favicon.ico' alt='虎牙' className='w-8 h-8' />
                               ) : platform === 'bilibili' ? (
                                 <img src='https://www.bilibili.com/favicon.ico' alt='哔哩哔哩' className='w-8 h-8' />
+                              ) : platform === 'douyin' ? (
+                                <img src='https://lf1-cdn-tos.bytegoofy.com/goofy/ies/douyin_web/public/favicon.ico' alt='抖音' className='w-8 h-8' />
                               ) : (
                                 <Radio className='w-6 h-6 text-gray-500' />
                               )}
                             </div>
                             <div className='flex-1 min-w-0 text-left'>
                               <div className='text-sm font-medium text-gray-900 dark:text-gray-100 truncate'>
-                                {platform === 'huya' ? '虎牙' : platform === 'bilibili' ? '哔哩哔哩' : platform}
+                                {platform === 'huya' ? '虎牙' : platform === 'bilibili' ? '哔哩哔哩' : platform === 'douyin' ? '抖音' : platform}
                               </div>
                               <div className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
                                 {sources.filter(s => s.platform === platform).length} 个房间

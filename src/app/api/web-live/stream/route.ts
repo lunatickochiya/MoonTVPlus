@@ -97,6 +97,75 @@ async function getBilibiliStream(roomId: string) {
   return m3u8Url;
 }
 
+async function getDouyinStream(roomId: string) {
+  const cookies = 'ttwid=1%7C2iDIYVmjzMcpZ20fcaFde0VghXAA3NaNXE_SLR68IyE%7C1761045455%7Cab35197d5cfb21df6cbb2fa7ef1c9262206b062c315b9d04da746d0b37dfbc7d';
+
+  const headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.5845.97 Safari/537.36',
+    'Referer': 'https://live.douyin.com/',
+    'Cookie': cookies
+  };
+
+  // 构建API参数
+  const params = new URLSearchParams({
+    aid: '6383',
+    app_name: 'douyin_web',
+    live_id: '1',
+    device_platform: 'web',
+    language: 'zh-CN',
+    browser_language: 'zh-CN',
+    browser_platform: 'Win32',
+    browser_name: 'Chrome',
+    browser_version: '116.0.0.0',
+    web_rid: roomId,
+    msToken: ''
+  });
+
+  const apiUrl = `https://live.douyin.com/webcast/room/web/enter/?${params.toString()}`;
+
+  const response = await fetch(apiUrl, { headers });
+  const jsonData = await response.json();
+
+  if (!jsonData.data || !jsonData.data.data) {
+    throw new Error('获取直播间信息失败');
+  }
+
+  const roomData = jsonData.data.data[0];
+  const status = roomData.status;
+
+  if (status !== 2) {
+    throw new Error('直播未开启');
+  }
+
+  const streamUrl = roomData.stream_url;
+  if (!streamUrl) {
+    throw new Error('未找到流地址');
+  }
+
+  // 获取m3u8地址
+  const hlsPullUrlMap = streamUrl.hls_pull_url_map;
+  if (!hlsPullUrlMap) {
+    throw new Error('未找到m3u8地址');
+  }
+
+  // 尝试获取原画质，如果没有则获取第一个可用的
+  let m3u8Url = hlsPullUrlMap.ORIGIN || hlsPullUrlMap.FULL_HD1 || hlsPullUrlMap.HD1 || hlsPullUrlMap.SD1 || hlsPullUrlMap.SD2;
+
+  if (!m3u8Url) {
+    // 如果上述都没有，获取第一个可用的
+    const urls = Object.values(hlsPullUrlMap);
+    if (urls.length > 0) {
+      m3u8Url = urls[0] as string;
+    }
+  }
+
+  if (!m3u8Url) {
+    throw new Error('未找到可用的m3u8地址');
+  }
+
+  return m3u8Url;
+}
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -140,6 +209,16 @@ export async function GET(request: NextRequest) {
 
     if (platform === 'bilibili') {
       const streamUrl = await getBilibiliStream(roomId);
+      const proxyUrl = `/api/web-live/proxy/proxy.m3u8?url=${encodeURIComponent(streamUrl)}`;
+
+      return NextResponse.json({
+        url: proxyUrl,
+        originalUrl: streamUrl
+      });
+    }
+
+    if (platform === 'douyin') {
+      const streamUrl = await getDouyinStream(roomId);
       const proxyUrl = `/api/web-live/proxy/proxy.m3u8?url=${encodeURIComponent(streamUrl)}`;
 
       return NextResponse.json({

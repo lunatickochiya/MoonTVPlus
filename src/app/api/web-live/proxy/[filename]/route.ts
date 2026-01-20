@@ -49,6 +49,8 @@ export async function GET(request: NextRequest) {
     let referer = 'https://www.huya.com/';
     if (url.includes('bilivideo.com') || url.includes('bilibili.com')) {
       referer = 'https://live.bilibili.com/';
+    } else if (url.includes('douyin.com') || url.includes('douyincdn.com')) {
+      referer = 'https://live.douyin.com/';
     }
 
     const streamRes = await fetch(url, {

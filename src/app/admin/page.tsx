@@ -10831,6 +10831,7 @@ const WebLiveConfig = ({
             >
               <option value='huya'>虎牙</option>
               <option value='bilibili'>哔哩哔哩</option>
+              <option value='douyin'>抖音</option>
             </select>
             <input
               type='text'
@@ -10881,6 +10882,7 @@ const WebLiveConfig = ({
               >
                 <option value='huya'>虎牙</option>
                 <option value='bilibili'>哔哩哔哩</option>
+                <option value='douyin'>抖音</option>
               </select>
             </div>
             <div>
@@ -10922,9 +10924,9 @@ const WebLiveConfig = ({
               <tr key={source.key} className='hover:bg-gray-50 dark:hover:bg-gray-800'>
                 <td className='px-3 sm:px-6 py-4 text-sm text-gray-900 dark:text-gray-100'>
                   <div>{source.name}</div>
-                  <div className='sm:hidden text-xs text-gray-500 dark:text-gray-400 mt-1'>{source.platform === 'huya' ? '虎牙' : source.platform === 'bilibili' ? '哔哩哔哩' : source.platform} · {source.roomId}</div>
+                  <div className='sm:hidden text-xs text-gray-500 dark:text-gray-400 mt-1'>{source.platform === 'huya' ? '虎牙' : source.platform === 'bilibili' ? '哔哩哔哩' : source.platform === 'douyin' ? '抖音' : source.platform} · {source.roomId}</div>
                 </td>
-                <td className='hidden sm:table-cell px-6 py-4 text-sm text-gray-900 dark:text-gray-100'>{source.platform === 'huya' ? '虎牙' : source.platform === 'bilibili' ? '哔哩哔哩' : source.platform}</td>
+                <td className='hidden sm:table-cell px-6 py-4 text-sm text-gray-900 dark:text-gray-100'>{source.platform === 'huya' ? '虎牙' : source.platform === 'bilibili' ? '哔哩哔哩' : source.platform === 'douyin' ? '抖音' : source.platform}</td>
                 <td className='hidden sm:table-cell px-6 py-4 text-sm text-gray-900 dark:text-gray-100'>{source.roomId}</td>
                 <td className='px-3 sm:px-6 py-4 whitespace-nowrap'>
                   <span className={`px-2 py-1 text-xs rounded-full whitespace-nowrap ${!source.disabled ? 'bg-green-100 dark:bg-green-900/20 text-green-800 dark:text-green-300' : 'bg-red-100 dark:bg-red-900/20 text-red-800 dark:text-red-300'}`}>
