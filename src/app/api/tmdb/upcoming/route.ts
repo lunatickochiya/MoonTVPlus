@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getTMDBUpcomingContent } from '@/lib/tmdb.client';
+
 import { getConfig } from '@/lib/config';
+import { getTMDBUpcomingContent } from '@/lib/tmdb.client';
 
 // 内存缓存对象
 interface CacheItem {
@@ -28,6 +29,7 @@ export async function GET(request: NextRequest) {
     const config = await getConfig();
     const tmdbApiKey = config.SiteConfig?.TMDBApiKey;
     const tmdbProxy = config.SiteConfig?.TMDBProxy;
+    const tmdbReverseProxy = config.SiteConfig?.TMDBReverseProxy;
 
     if (!tmdbApiKey) {
       return NextResponse.json(
@@ -37,7 +39,7 @@ export async function GET(request: NextRequest) {
     }
 
     // 调用TMDB API获取数据
-    const result = await getTMDBUpcomingContent(tmdbApiKey, tmdbProxy);
+    const result = await getTMDBUpcomingContent(tmdbApiKey, tmdbProxy, tmdbReverseProxy);
 
     if (result.code !== 200) {
       return NextResponse.json(

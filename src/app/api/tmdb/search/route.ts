@@ -1,12 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, no-console */
 
+import { HttpsProxyAgent } from 'https-proxy-agent';
 import { NextRequest, NextResponse } from 'next/server';
+import nodeFetch from 'node-fetch';
 
 import { getAuthInfoFromCookie } from '@/lib/auth';
 import { getConfig } from '@/lib/config';
 import { getNextApiKey } from '@/lib/tmdb.client';
-import { HttpsProxyAgent } from 'https-proxy-agent';
-import nodeFetch from 'node-fetch';
 
 export const runtime = 'nodejs';
 
@@ -31,6 +31,7 @@ export async function GET(request: NextRequest) {
     const config = await getConfig();
     const tmdbApiKey = config.SiteConfig.TMDBApiKey;
     const tmdbProxy = config.SiteConfig.TMDBProxy;
+    const tmdbReverseProxy = config.SiteConfig.TMDBReverseProxy;
 
     const actualKey = getNextApiKey(tmdbApiKey || '');
     if (!actualKey) {
@@ -40,8 +41,10 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // 使用反代代理或默认 Base URL
+    const baseUrl = tmdbReverseProxy || 'https://api.themoviedb.org';
     // 使用 multi search 同时搜索电影和电视剧
-    const url = `https://api.themoviedb.org/3/search/multi?api_key=${actualKey}&language=zh-CN&query=${encodeURIComponent(query)}&page=1`;
+    const url = `${baseUrl}/3/search/multi?api_key=${actualKey}&language=zh-CN&query=${encodeURIComponent(query)}&page=1`;
 
     const fetchOptions: any = tmdbProxy
       ? {

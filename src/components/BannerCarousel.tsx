@@ -1,10 +1,12 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { ChevronLeft, ChevronRight, Play } from 'lucide-react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { getTMDBImageUrl, getGenreNames, type TMDBItem } from '@/lib/tmdb.client';
-import { ChevronLeft, ChevronRight, Play } from 'lucide-react';
+import { useCallback, useEffect, useRef,useState } from 'react';
+
+import { type TMDBItem,getGenreNames, getTMDBImageUrl } from '@/lib/tmdb.client';
+import { processImageUrl } from '@/lib/utils';
 
 interface BannerCarouselProps {
   autoPlayInterval?: number; // 自动播放间隔（毫秒）
@@ -14,6 +16,8 @@ interface BannerCarouselProps {
 interface BannerItem extends TMDBItem {
   subtitle?: string; // TX数据源的子标题
   tags?: string[]; // TX数据源的标签
+  trailer_url?: string | null; // 豆瓣预告片直链
+  genres?: string[]; // 豆瓣数据源的类型标签
 }
 
 export default function BannerCarousel({ autoPlayInterval = 5000 }: BannerCarouselProps) {
@@ -23,6 +27,9 @@ export default function BannerCarousel({ autoPlayInterval = 5000 }: BannerCarous
   const [isLoading, setIsLoading] = useState(true);
   const [isPaused, setIsPaused] = useState(false);
   const [skipNextAutoPlay, setSkipNextAutoPlay] = useState(false); // 跳过下一次自动播放
+  const [isYouTubeAccessible, setIsYouTubeAccessible] = useState(false); // YouTube连通性（默认false，检查后再决定）
+  const [enableTrailers, setEnableTrailers] = useState(false); // 是否启用预告片（默认关闭）
+  const [dataSource, setDataSource] = useState<string>(''); // 当前数据源
   const touchStartX = useRef(0);
   const touchEndX = useRef(0);
   const isManualChange = useRef(false); // 标记是否为手动切换
@@ -43,20 +50,70 @@ export default function BannerCarousel({ autoPlayInterval = 5000 }: BannerCarous
   // 获取图片URL（处理TX完整URL和TMDB路径）
   const getImageUrl = (path: string | null) => {
     if (!path) return '';
-    // 如果是完整URL（TX数据源），直接返回
+    // 如果是完整URL（TX数据源或豆瓣），使用processImageUrl统一处理
     if (path.startsWith('http://') || path.startsWith('https://')) {
-      return path;
+      return processImageUrl(path);
     }
-    // 否则使用TMDB的URL拼接
-    return getTMDBImageUrl(path, 'original');
+    // 否则使用TMDB的URL拼接，并通过processImageUrl处理
+    return processImageUrl(getTMDBImageUrl(path, 'original'));
   };
+
+  // 获取视频URL（处理豆瓣视频代理）
+  const getVideoUrl = (url: string | null) => {
+    if (!url) return null;
+    // 豆瓣视频直接使用服务器代理
+    if (url.includes('doubanio.com')) {
+      return `/api/video-proxy?url=${encodeURIComponent(url)}`;
+    }
+    return url;
+  };
+
+  // 读取本地设置
+  useEffect(() => {
+    const setting = localStorage.getItem('enableTrailers');
+    if (setting !== null) {
+      setEnableTrailers(setting === 'true');
+    }
+  }, []);
+
+  // 检测YouTube连通性 - 仅在启用预告片且数据源为TMDB时检测
+  useEffect(() => {
+    // 如果未启用预告片或数据源不是TMDB，不进行检测
+    if (!enableTrailers || dataSource !== 'TMDB') {
+      setIsYouTubeAccessible(false);
+      return;
+    }
+
+    const checkYouTubeAccess = () => {
+      const img = document.createElement('img');
+      const timeout = setTimeout(() => {
+        img.src = '';
+        setIsYouTubeAccessible(false);
+      }, 3000);
+
+      img.onload = () => {
+        clearTimeout(timeout);
+        setIsYouTubeAccessible(true);
+      };
+
+      img.onerror = () => {
+        clearTimeout(timeout);
+        setIsYouTubeAccessible(false);
+      };
+
+      // 添加随机查询参数避免缓存
+      img.src = `https://i.ytimg.com/vi/dQw4w9WgXcQ/default.jpg?t=${Date.now()}`;
+    };
+
+    checkYouTubeAccess();
+  }, [enableTrailers, dataSource]);
 
   // 获取热门内容
   useEffect(() => {
     const fetchTrending = async () => {
       try {
         // 先尝试从所有可能的数据源缓存中读取
-        const sources = ['TMDB', 'TX'];
+        const sources = ['TMDB', 'TX', 'Douban'];
         let cachedData = null;
         let validSource = null;
 
@@ -84,6 +141,7 @@ export default function BannerCarousel({ autoPlayInterval = 5000 }: BannerCarous
         // 如果有有效的缓存，直接使用，不请求API
         if (cachedData) {
           setItems(cachedData);
+          setDataSource(validSource || ''); // 设置数据源
           setIsLoading(false);
           return;
         }
@@ -97,6 +155,7 @@ export default function BannerCarousel({ autoPlayInterval = 5000 }: BannerCarous
           const cacheKey = getLocalStorageKey(dataSource);
 
           setItems(result.list);
+          setDataSource(dataSource); // 设置数据源
 
           // 保存到 localStorage（使用数据源特定的key）
           try {
@@ -234,7 +293,7 @@ export default function BannerCarousel({ autoPlayInterval = 5000 }: BannerCarous
         }
       }}
     >
-      {/* 背景图片 */}
+      {/* 背景图片或视频 */}
       <div className="absolute inset-0">
         {items.map((item, index) => (
           <div
@@ -243,14 +302,47 @@ export default function BannerCarousel({ autoPlayInterval = 5000 }: BannerCarous
               index === currentIndex ? 'opacity-100' : 'opacity-0'
             }`}
           >
-            <Image
-              src={getImageUrl(item.backdrop_path || item.poster_path)}
-              alt={item.title}
-              fill
-              className="object-cover"
-              priority={index === 0}
-              sizes="100vw"
-            />
+            {item.trailer_url && enableTrailers ? (
+              /* 显示豆瓣直链视频 */
+              <div className="absolute inset-0 overflow-hidden">
+                <video
+                  src={getVideoUrl(item.trailer_url) || undefined}
+                  className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 min-w-full min-h-full w-auto h-auto object-cover"
+                  autoPlay
+                  muted
+                  loop
+                  playsInline
+                  preload="metadata"
+                />
+              </div>
+            ) : item.video_key && isYouTubeAccessible && enableTrailers ? (
+              /* 显示YouTube视频 */
+              <div className="absolute inset-0 overflow-hidden">
+                <iframe
+                  src={`https://www.youtube.com/embed/${item.video_key}?listType=playlist&autoplay=1&mute=1&controls=0&loop=1&playlist=${item.video_key}&modestbranding=1&rel=0&showinfo=0&vq=hd1080&hd=1&disablekb=1&fs=0&iv_load_policy=3`}
+                  className="absolute top-1/2 left-1/2 pointer-events-none"
+                  allow="autoplay; encrypted-media"
+                  style={{
+                    border: 'none',
+                    width: '100vw',
+                    height: '100vh',
+                    minWidth: '100%',
+                    minHeight: '100%',
+                    transform: 'translate(-50%, -50%)',
+                  }}
+                />
+              </div>
+            ) : (
+              /* 显示图片 */
+              <Image
+                src={getImageUrl(item.backdrop_path || item.poster_path)}
+                alt={item.title}
+                fill
+                className="object-cover"
+                priority={index === 0}
+                sizes="100vw"
+              />
+            )}
             {/* 渐变遮罩 */}
             <div className="absolute inset-0 bg-gradient-to-r from-black/80 via-black/50 to-transparent"></div>
             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent"></div>
@@ -271,11 +363,18 @@ export default function BannerCarousel({ autoPlayInterval = 5000 }: BannerCarous
                 {currentItem.vote_average.toFixed(1)}
               </span>
             )}
-            {/* 显示TX数据源的标签 */}
+            {/* 显示标签：优先TX的tags，其次豆瓣的genres，最后TMDB的genre_ids */}
             {currentItem.tags && currentItem.tags.length > 0 ? (
               currentItem.tags.slice(0, 3).map((tag, index) => (
                 <span key={index} className="px-2 py-1 bg-white/20 backdrop-blur-sm rounded text-sm">
                   {tag}
+                </span>
+              ))
+            ) : currentItem.genres && Array.isArray(currentItem.genres) && currentItem.genres.length > 0 ? (
+              /* 显示豆瓣数据源的标签 */
+              currentItem.genres.slice(0, 3).map((genre, index) => (
+                <span key={index} className="px-2 py-1 bg-white/20 backdrop-blur-sm rounded text-sm">
+                  {genre}
                 </span>
               ))
             ) : (

@@ -1,10 +1,11 @@
 /* eslint-disable react-hooks/exhaustive-deps, @typescript-eslint/no-explicit-any,@typescript-eslint/no-non-null-assertion,no-empty */
 'use client';
 
-import { ChevronUp, RefreshCw, Search, X, Film, HardDrive, Magnet } from 'lucide-react';
+import { ChevronUp, Film, HardDrive, Magnet,RefreshCw, Search, X } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import React, { startTransition, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 
+import { getAuthInfoFromBrowserCookie } from '@/lib/auth';
 import {
   addSearchHistory,
   clearSearchHistory,
@@ -13,15 +14,14 @@ import {
   subscribeToDataUpdates,
 } from '@/lib/db.client';
 import { SearchResult } from '@/lib/types';
-import { getAuthInfoFromBrowserCookie } from '@/lib/auth';
 
+import AcgSearch from '@/components/AcgSearch';
+import CapsuleSwitch from '@/components/CapsuleSwitch';
 import PageLayout from '@/components/PageLayout';
+import PansouSearch from '@/components/PansouSearch';
 import SearchResultFilter, { SearchFilterCategory } from '@/components/SearchResultFilter';
 import SearchSuggestions from '@/components/SearchSuggestions';
 import VideoCard, { VideoCardHandle } from '@/components/VideoCard';
-import PansouSearch from '@/components/PansouSearch';
-import AcgSearch from '@/components/AcgSearch';
-import CapsuleSwitch from '@/components/CapsuleSwitch';
 
 function SearchPageClient() {
   // 搜索历史
@@ -36,6 +36,10 @@ function SearchPageClient() {
   const [triggerAcgSearch, setTriggerAcgSearch] = useState(false);
   // 用户权限
   const [userRole, setUserRole] = useState<'owner' | 'admin' | 'user' | null>(null);
+  // 繁体转简体转换器
+  const converterRef = useRef<((text: string) => string) | null>(null);
+  // 转换器是否已初始化
+  const [converterReady, setConverterReady] = useState(false);
 
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -212,28 +216,106 @@ function SearchPageClient() {
     return order === 'asc' ? aNum - bNum : bNum - aNum;
   };
 
+  // 规范化标题用于聚合（去除特殊符号、括号、空格和全角空格）
+  const normalizeTitle = (title: string) => {
+    return title
+      .replace(/[\s\u3000]/g, '') // 去除空格和全角空格
+      .replace(/[()（）[\]【】{}「」『』<>《》]/g, '') // 去除各种括号
+      .replace(/[^\w\u4e00-\u9fa5]/g, ''); // 去除特殊符号，保留字母、数字、下划线和中文
+  };
+
+  // 辅助函数：获取视频类型
+  const getType = (item: SearchResult): 'movie' | 'tv' => {
+    // 1. Emby 和 OpenList 源：使用 type_name（基于 TMDB，最可靠）
+    if (item.source === 'emby' || item.source?.startsWith('emby_') || item.source === 'openlist') {
+      return item.type_name === '电影' ? 'movie' : 'tv';
+    }
+
+    // 2. API 采集源：综合判断
+    const typeName = item.type_name?.toLowerCase() || '';
+
+    // 2.1 明确包含"电影"或"movie"或"片"的，判断为电影
+    if (typeName.includes('电影') || typeName.includes('movie') ||
+        typeName.endsWith('片') && !typeName.includes('动漫')) {
+      return 'movie';
+    }
+
+    // 2.2 包含"剧"、"动漫"、"综艺"等关键词的，判断为剧集
+    if (typeName.includes('剧') || typeName.includes('动漫') ||
+        typeName.includes('综艺') || typeName.includes('anime')) {
+      return 'tv';
+    }
+
+    // 2.3 检查 episodes_titles：如果包含"第X集"，判断为剧集
+    if (item.episodes_titles && item.episodes_titles.length > 0) {
+      const firstTitle = item.episodes_titles[0] || '';
+      if (/第\d+集|第\d+话|EP?\d+/i.test(firstTitle)) {
+        return 'tv';
+      }
+    }
+
+    // 2.4 兜底：使用 episodes.length（最不可靠）
+    return item.episodes.length === 1 ? 'movie' : 'tv';
+  };
   // 聚合后的结果（按标题和年份分组）
   const aggregatedResults = useMemo(() => {
-    const map = new Map<string, SearchResult[]>();
-    const keyOrder: string[] = []; // 记录键出现的顺序
+    //===== 阶段1：按 normalizedTitle-type 初步分组 =====
+    const preliminaryMap = new Map<string, SearchResult[]>();
 
     searchResults.forEach((item) => {
-      // 使用 title + year + type 作为键，year 必然存在，但依然兜底 'unknown'
-      const key = `${item.title.replaceAll(' ', '')}-${item.year || 'unknown'
-        }-${item.episodes.length === 1 ? 'movie' : 'tv'}`;
-      const arr = map.get(key) || [];
+      const normalizedTitle = normalizeTitle(item.title);
+      const type = getType(item);
+      const preliminaryKey = `${normalizedTitle}-${type}`;
 
-      // 如果是新的键，记录其顺序
-      if (arr.length === 0) {
-        keyOrder.push(key);
-      }
-
+      const arr = preliminaryMap.get(preliminaryKey) || [];
       arr.push(item);
-      map.set(key, arr);
+      preliminaryMap.set(preliminaryKey, arr);
+    });
+
+    //===== 阶段2：智能年份推断和最终分组 =====
+    const finalMap = new Map<string, SearchResult[]>();
+    const keyOrder: string[] = [];
+
+    preliminaryMap.forEach((group, preliminaryKey) => {
+      // 分离有年份和无年份的结果
+  const withYear = new Map<string, SearchResult[]>();
+      const withoutYear: SearchResult[] = [];
+
+      group.forEach((item) => {
+        const year = item.year;
+
+        // 判断是否为有效年份：必须是4位数字，且不能是空字符串或'unknown'
+        if (year && year.trim() !== '' && year !== 'unknown' && /^\d{4}$/.test(year)) {
+          // 有有效年份
+        const arr = withYear.get(year) || [];
+          arr.push(item);
+          withYear.set(year, arr);
+        } else {
+          // 无年份（包括空字符串、'unknown'、null、undefined等）
+          withoutYear.push(item);
+        }
+      });
+
+      // 如果有有效年份组
+      if (withYear.size > 0) {
+        // 将无年份的结果复制到每个有年份的组中
+        withYear.forEach((yearGroup, year) => {
+          const finalKey = `${preliminaryKey}-${year}`;
+          // 合并：有年份的 + 无年份的（复制）
+          const mergedGroup = [...yearGroup, ...withoutYear];
+          finalMap.set(finalKey, mergedGroup);
+          keyOrder.push(finalKey);
+        });
+      } else if (withoutYear.length > 0) {
+        // 如果完全没有年份信息，单独成组
+        const finalKey = `${preliminaryKey}-unknown`;
+        finalMap.set(finalKey, withoutYear);
+        keyOrder.push(finalKey);
+      }
     });
 
     // 按出现顺序返回聚合结果
-    return keyOrder.map(key => [key, map.get(key)!] as [string, SearchResult[]]);
+    return keyOrder.map(key => [key, finalMap.get(key)!] as [string, SearchResult[]]);
   }, [searchResults]);
 
   // 当聚合结果变化时，如果某个聚合已存在，则调用其卡片 ref 的 set 方法增量更新
@@ -282,7 +364,26 @@ function SearchPageClient() {
     const sourceOptions: { label: string; value: string }[] = [
       { label: '全部来源', value: 'all' },
       ...Array.from(sourcesSet.entries())
-        .sort((a, b) => a[1].localeCompare(b[1]))
+        .sort((a, b) => {
+          // 判断是否为 openlist
+          const aIsOpenList = a[0] === 'openlist';
+          const bIsOpenList = b[0] === 'openlist';
+
+          // 判断是否为 emby 源（包括 emby 和 emby_xxx 格式）
+          const aIsEmby = a[0] === 'emby' || a[0].startsWith('emby_');
+          const bIsEmby = b[0] === 'emby' || b[0].startsWith('emby_');
+
+          // 优先级：OpenList(100) > Emby(90) > 其他(0)
+          const aPriority = aIsOpenList ? 100 : aIsEmby ? 90 : 0;
+          const bPriority = bIsOpenList ? 100 : bIsEmby ? 90 : 0;
+
+          if (aPriority !== bPriority) {
+            return bPriority - aPriority; // 降序排列
+          }
+
+          // 同优先级内按名称排序
+          return a[1].localeCompare(b[1]);
+        })
         .map(([value, label]) => ({ label, value })),
     ];
 
@@ -441,6 +542,26 @@ function SearchPageClient() {
     const authInfo = getAuthInfoFromBrowserCookie();
     setUserRole(authInfo?.role || null);
 
+    // 初始化繁体转简体转换器
+    if (typeof window !== 'undefined') {
+      import('opencc-js').then((module) => {
+        try {
+          const OpenCC = module.default || module;
+          const converter = OpenCC.Converter({ from: 'hk', to: 'cn' });
+          converterRef.current = converter;
+          setConverterReady(true);
+        } catch (error) {
+          console.error('初始化繁体转简体转换器失败:', error);
+          setConverterReady(true); // 即使失败也设置为 true，避免阻塞
+        }
+      }).catch((error) => {
+        console.error('加载 opencc-js 失败:', error);
+        setConverterReady(true); // 即使失败也设置为 true，避免阻塞
+      });
+    } else {
+      setConverterReady(true);
+    }
+
     // 初始加载搜索历史
     getSearchHistory().then(setSearchHistory);
 
@@ -503,13 +624,41 @@ function SearchPageClient() {
   }, []);
 
   useEffect(() => {
+    // 等待转换器初始化完成
+    if (!converterReady) {
+      return;
+    }
+
     // 当搜索参数变化时更新搜索状态
-    const query = searchParams.get('q') || '';
+    let query = searchParams.get('q') || '';
+
+    // 如果开启了繁体转简体，进行转换
+    if (query && typeof window !== 'undefined') {
+      const searchTraditionalToSimplified = localStorage.getItem('searchTraditionalToSimplified');
+
+      if (searchTraditionalToSimplified === 'true' && converterRef.current) {
+        try {
+          const originalQuery = query;
+          query = converterRef.current(query);
+
+          // 如果转换后的文本与原文本不同，更新 URL
+          if (originalQuery !== query) {
+            const trimmedConverted = query.trim();
+            // 使用 replace 而不是 push，避免在历史记录中留下繁体版本
+            router.replace(`/search?q=${encodeURIComponent(trimmedConverted)}${searchParams.get('type') ? `&type=${searchParams.get('type')}` : ''}`);
+            return; // 等待 URL 更新后重新触发此 effect
+          }
+        } catch (error) {
+          console.error('[URL参数监听] 繁体转简体转换失败:', error);
+        }
+      }
+    }
+
     currentQueryRef.current = query.trim();
 
     if (query) {
       setSearchQuery(query);
-      
+
       const trimmed = query.trim();
       
       // 检查是否有缓存且不是强制刷新
@@ -702,7 +851,7 @@ function SearchPageClient() {
       setShowResults(false);
       setShowSuggestions(false);
     }
-  }, [searchParams, forceRefresh]);
+  }, [searchParams, forceRefresh, converterReady]);
 
   // 组件卸载时，关闭可能存在的连接
   useEffect(() => {
@@ -741,8 +890,20 @@ function SearchPageClient() {
   // 搜索表单提交时触发，处理搜索逻辑
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    const trimmed = searchQuery.trim().replace(/\s+/g, ' ');
+    let trimmed = searchQuery.trim().replace(/\s+/g, ' ');
     if (!trimmed) return;
+
+    // 如果开启了繁体转简体，进行转换
+    if (typeof window !== 'undefined') {
+      const searchTraditionalToSimplified = localStorage.getItem('searchTraditionalToSimplified');
+      if (searchTraditionalToSimplified === 'true' && converterRef.current) {
+        try {
+          trimmed = converterRef.current(trimmed);
+        } catch (error) {
+          console.error('繁体转简体转换失败:', error);
+        }
+      }
+    }
 
     // 回显搜索框
     setSearchQuery(trimmed);
@@ -766,7 +927,21 @@ function SearchPageClient() {
   };
 
   const handleSuggestionSelect = (suggestion: string) => {
-    setSearchQuery(suggestion);
+    let processedSuggestion = suggestion;
+
+    // 如果开启了繁体转简体，进行转换
+    if (typeof window !== 'undefined') {
+      const searchTraditionalToSimplified = localStorage.getItem('searchTraditionalToSimplified');
+      if (searchTraditionalToSimplified === 'true' && converterRef.current) {
+        try {
+          processedSuggestion = converterRef.current(suggestion);
+        } catch (error) {
+          console.error('繁体转简体转换失败:', error);
+        }
+      }
+    }
+
+    setSearchQuery(processedSuggestion);
     setShowSuggestions(false);
 
     // 自动执行搜索
@@ -775,15 +950,15 @@ function SearchPageClient() {
     // 根据当前选项卡执行不同的搜索
     if (activeTab === 'video') {
       // 影视搜索
-      router.push(`/search?q=${encodeURIComponent(suggestion)}&type=video`);
+      router.push(`/search?q=${encodeURIComponent(processedSuggestion)}&type=video`);
       // 其余由 searchParams 变化的 effect 处理
     } else if (activeTab === 'pansou') {
       // 网盘搜索 - 触发搜索
-      router.push(`/search?q=${encodeURIComponent(suggestion)}&type=pansou`);
+      router.push(`/search?q=${encodeURIComponent(processedSuggestion)}&type=pansou`);
       setTriggerPansouSearch(prev => !prev);
     } else if (activeTab === 'acg') {
       // ACG 磁力搜索 - 触发搜索
-      router.push(`/search?q=${encodeURIComponent(suggestion)}&type=acg`);
+      router.push(`/search?q=${encodeURIComponent(processedSuggestion)}&type=acg`);
       setTriggerAcgSearch(prev => !prev);
     }
   };
@@ -999,7 +1174,14 @@ function SearchPageClient() {
                       const poster = group[0]?.poster || '';
                       const year = group[0]?.year || 'unknown';
                       const { episodes, source_names, douban_id } = computeGroupStats(group);
-                      const type = episodes === 1 ? 'movie' : 'tv';
+
+                      // 从 mapKey 中提取类型（mapKey 格式：normalizedTitle-type-year）
+                      // 找到最后一个 '-' 之前的部分，再找倒数第二个 '-'
+                      const lastDashIndex = mapKey.lastIndexOf('-');
+                      const secondLastDashIndex = mapKey.lastIndexOf('-', lastDashIndex - 1);
+                      const type = secondLastDashIndex > 0
+                        ? mapKey.substring(secondLastDashIndex + 1, lastDashIndex) as 'movie' | 'tv'
+                        : (episodes === 1 ? 'movie' : 'tv'); // 兜底
 
                       // 如果该聚合第一次出现，写入初始统计
                       if (!groupStatsRef.current.has(mapKey)) {

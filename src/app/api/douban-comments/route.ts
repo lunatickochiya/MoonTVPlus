@@ -1,5 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
 import * as cheerio from 'cheerio';
+import { NextRequest, NextResponse } from 'next/server';
+
+import { fetchDoubanWithVerification } from '@/lib/douban-anti-crawler';
 
 export const runtime = 'nodejs';
 
@@ -25,19 +27,10 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // 请求豆瓣短评页面
+    // 请求豆瓣短评页面（使用反爬验证）
     const url = `https://movie.douban.com/subject/${doubanId}/comments?start=${start}&limit=${limit}&status=P&sort=new_score`;
 
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        Accept:
-          'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-        Referer: 'https://movie.douban.com/',
-      },
-    });
+    const response = await fetchDoubanWithVerification(url);
 
     if (!response.ok) {
       return NextResponse.json(

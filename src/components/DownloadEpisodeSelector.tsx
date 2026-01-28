@@ -1,6 +1,6 @@
 /* eslint-disable @next/next/no-img-element */
 
-import React, { useState, useMemo } from 'react';
+import React, { useMemo,useState } from 'react';
 
 interface DownloadEpisodeSelectorProps {
   /** 是否显示弹窗 */
@@ -290,6 +290,10 @@ const DownloadEpisodeSelector: React.FC<DownloadEpisodeSelectorProps> = ({
                     const title = episodesTitles?.[episodeIndex];
                     if (!title) {
                       return episodeNumber;
+                    }
+                    // 如果是 OVA 格式，直接返回完整标题
+                    if (title.match(/^OVA\s+\d+/i)) {
+                      return title;
                     }
                     // 如果匹配"第X集"、"第X话"、"X集"、"X话"格式，提取中间的数字
                     const match = title.match(/(?:第)?(\d+)(?:集|话)/);
