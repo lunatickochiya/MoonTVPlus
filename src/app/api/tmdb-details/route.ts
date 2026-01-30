@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
+
+import { getConfig } from '@/lib/config';
 import {
-  searchTMDBMulti,
+  getTMDBImageUrl,
   getTMDBMovieDetails,
   getTMDBTVDetails,
-  getTMDBImageUrl,
+  searchTMDBMulti,
 } from '@/lib/tmdb.client';
-import { getConfig } from '@/lib/config';
 
 // 服务器端缓存（内存）
 const searchCache = new Map<
@@ -61,6 +62,7 @@ export async function GET(request: NextRequest) {
     const config = await getConfig();
     const tmdbApiKey = config.SiteConfig.TMDBApiKey;
     const tmdbProxy = config.SiteConfig.TMDBProxy;
+    const tmdbReverseProxy = config.SiteConfig.TMDBReverseProxy;
 
     if (!tmdbApiKey) {
       return NextResponse.json(
@@ -94,7 +96,8 @@ export async function GET(request: NextRequest) {
         const searchResult = await searchTMDBMulti(
           tmdbApiKey,
           cleanedTitle,
-          tmdbProxy
+          tmdbProxy,
+          tmdbReverseProxy
         );
 
         if (searchResult.code !== 200 || !searchResult.results.length) {
@@ -134,9 +137,9 @@ export async function GET(request: NextRequest) {
     // 获取详情
     let detailsResult;
     if (mediaType === 'movie') {
-      detailsResult = await getTMDBMovieDetails(tmdbApiKey, tmdbId, tmdbProxy);
+      detailsResult = await getTMDBMovieDetails(tmdbApiKey, tmdbId, tmdbProxy, tmdbReverseProxy);
     } else {
-      detailsResult = await getTMDBTVDetails(tmdbApiKey, tmdbId, tmdbProxy);
+      detailsResult = await getTMDBTVDetails(tmdbApiKey, tmdbId, tmdbProxy, tmdbReverseProxy);
     }
 
     if (detailsResult.code !== 200 || !detailsResult.details) {
@@ -162,6 +165,7 @@ export async function GET(request: NextRequest) {
       overview: details.overview || '',
       rating: details.vote_average ? details.vote_average.toFixed(1) : '',
       releaseDate: details.release_date || details.first_air_date || '',
+      genres: details.genres || [], // 添加类型标签
     };
 
     return NextResponse.json(responseData, {

@@ -2,11 +2,11 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { getAuthInfoFromCookie } from '@/lib/auth';
 import {
   orchestrateDataSources,
   VideoContext,
 } from '@/lib/ai-orchestrator';
+import { getAuthInfoFromCookie } from '@/lib/auth';
 import { getConfig } from '@/lib/config';
 import { db } from '@/lib/db';
 
@@ -34,8 +34,9 @@ async function streamOpenAIChat(
     model: string;
     temperature: number;
     maxTokens: number;
-  }
-): Promise<ReadableStream> {
+  },
+  enableStreaming = true
+): Promise<ReadableStream | Response> {
   const response = await fetch(`${config.baseURL}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -47,7 +48,7 @@ async function streamOpenAIChat(
       messages,
       temperature: config.temperature,
       max_tokens: config.maxTokens,
-      stream: true,
+      stream: enableStreaming,
     }),
   });
 
@@ -57,46 +58,7 @@ async function streamOpenAIChat(
     );
   }
 
-  return response.body!;
-}
-
-/**
- * Claude API流式聊天请求
- */
-async function streamClaudeChat(
-  messages: ChatMessage[],
-  systemPrompt: string,
-  config: {
-    apiKey: string;
-    model: string;
-    temperature: number;
-    maxTokens: number;
-  }
-): Promise<ReadableStream> {
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': config.apiKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: config.model,
-      max_tokens: config.maxTokens,
-      temperature: config.temperature,
-      system: systemPrompt,
-      messages: messages,
-      stream: true,
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(
-      `Claude API error: ${response.status} ${response.statusText}`
-    );
-  }
-
-  return response.body!;
+  return enableStreaming ? response.body! : response;
 }
 
 /**
@@ -239,6 +201,7 @@ export async function POST(request: NextRequest) {
         // TMDB 配置
         tmdbApiKey: adminConfig.SiteConfig.TMDBApiKey,
         tmdbProxy: adminConfig.SiteConfig.TMDBProxy,
+        tmdbReverseProxy: adminConfig.SiteConfig.TMDBReverseProxy,
         // 决策模型配置（固定使用自定义provider，复用主模型的API配置）
         enableDecisionModel: aiConfig.EnableDecisionModel,
         decisionProvider: 'custom',
@@ -265,6 +228,7 @@ export async function POST(request: NextRequest) {
     // 6. 调用自定义API
     const temperature = aiConfig.Temperature ?? 0.7;
     const maxTokens = aiConfig.MaxTokens ?? 1000;
+    const enableStreaming = aiConfig.EnableStreaming !== false; // 默认启用流式响应
 
     if (!aiConfig.CustomApiKey || !aiConfig.CustomBaseURL) {
       return NextResponse.json(
@@ -273,24 +237,34 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const stream = await streamOpenAIChat(messages, {
+    const result = await streamOpenAIChat(messages, {
       apiKey: aiConfig.CustomApiKey,
       baseURL: aiConfig.CustomBaseURL,
       model: aiConfig.CustomModel || 'gpt-3.5-turbo',
       temperature,
       maxTokens,
-    });
+    }, enableStreaming);
 
-    // 7. 转换为SSE格式并返回
-    const sseStream = transformToSSE(stream, 'openai');
+    // 7. 根据是否启用流式响应返回不同格式
+    if (enableStreaming) {
+      // 流式响应：转换为SSE格式并返回
+      const sseStream = transformToSSE(result as ReadableStream, 'openai');
 
-    return new NextResponse(sseStream, {
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        Connection: 'keep-alive',
-      },
-    });
+      return new NextResponse(sseStream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          Connection: 'keep-alive',
+        },
+      });
+    } else {
+      // 非流式响应：等待完整响应后返回JSON
+      const response = result as Response;
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content || '';
+
+      return NextResponse.json({ content });
+    }
   } catch (error) {
     console.error('❌ AI聊天API错误:', error);
     return NextResponse.json(

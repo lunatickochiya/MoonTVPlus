@@ -1,12 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, no-console */
 
+import { HttpsProxyAgent } from 'https-proxy-agent';
 import { NextRequest, NextResponse } from 'next/server';
+import nodeFetch from 'node-fetch';
 
 import { getAuthInfoFromCookie } from '@/lib/auth';
 import { getConfig } from '@/lib/config';
 import { getNextApiKey } from '@/lib/tmdb.client';
-import { HttpsProxyAgent } from 'https-proxy-agent';
-import nodeFetch from 'node-fetch';
 
 export const runtime = 'nodejs';
 
@@ -32,6 +32,7 @@ export async function GET(request: NextRequest) {
     const config = await getConfig();
     const tmdbApiKey = config.SiteConfig.TMDBApiKey;
     const tmdbProxy = config.SiteConfig.TMDBProxy;
+    const tmdbReverseProxy = config.SiteConfig.TMDBReverseProxy;
 
     const actualKey = getNextApiKey(tmdbApiKey || '');
     if (!actualKey) {
@@ -41,9 +42,11 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // 使用反代代理或默认 Base URL
+    const baseUrl = tmdbReverseProxy || 'https://api.themoviedb.org';
     // 根据类型选择API端点
     const endpoint = type === 'movie' ? 'movie' : 'tv';
-    const url = `https://api.themoviedb.org/3/${endpoint}/${id}?api_key=${actualKey}&language=zh-CN&append_to_response=credits`;
+    const url = `${baseUrl}/3/${endpoint}/${id}?api_key=${actualKey}&language=zh-CN&append_to_response=credits`;
 
     const fetchOptions: any = tmdbProxy
       ? {

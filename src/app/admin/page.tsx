@@ -33,6 +33,8 @@ import {
   ExternalLink,
   FileText,
   FolderOpen,
+  Globe,
+  Mail,
   Palette,
   Settings,
   Tv,
@@ -41,7 +43,7 @@ import {
   Video,
 } from 'lucide-react';
 import { GripVertical } from 'lucide-react';
-import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { AdminConfig, AdminConfigResult } from '@/lib/admin.types';
@@ -328,11 +330,13 @@ interface SiteConfig {
   DanmakuApiToken: string;
   TMDBApiKey?: string;
   TMDBProxy?: string;
+  TMDBReverseProxy?: string;
   BannerDataSource?: string;
   RecommendationDataSource?: string;
   PansouApiUrl?: string;
   PansouUsername?: string;
   PansouPassword?: string;
+  PansouKeywordBlocklist?: string;
   EnableComments: boolean;
   EnableRegistration?: boolean;
   RegistrationRequireTurnstile?: boolean;
@@ -360,6 +364,7 @@ interface DataSource {
   disabled?: boolean;
   from: 'config' | 'custom';
   proxyMode?: boolean;
+  weight?: number;
 }
 
 // 直播源数据类型
@@ -390,6 +395,7 @@ interface CollapsibleTabProps {
   isExpanded: boolean;
   onToggle: () => void;
   children: React.ReactNode;
+  isParent?: boolean;
 }
 
 const CollapsibleTab = ({
@@ -398,25 +404,38 @@ const CollapsibleTab = ({
   isExpanded,
   onToggle,
   children,
+  isParent = false,
 }: CollapsibleTabProps) => {
   return (
-    <div className='rounded-xl shadow-sm mb-4 overflow-hidden bg-white/80 backdrop-blur-md dark:bg-gray-800/50 dark:ring-1 dark:ring-gray-700'>
+    <div className={`rounded-xl shadow-sm mb-4 overflow-hidden ${
+      isParent
+        ? 'bg-gradient-to-r from-yellow-50 to-amber-50 dark:from-yellow-900/20 dark:to-amber-900/20 ring-2 ring-yellow-400/50 dark:ring-yellow-600/50'
+        : 'bg-white/80 backdrop-blur-md dark:bg-gray-800/50 dark:ring-1 dark:ring-gray-700'
+    }`}>
       <button
         onClick={onToggle}
-        className='w-full px-6 py-4 flex items-center justify-between bg-gray-50/70 dark:bg-gray-800/60 hover:bg-gray-100/80 dark:hover:bg-gray-700/60 transition-colors'
+        className={`w-full px-6 py-4 flex items-center justify-between transition-colors ${
+          isParent
+            ? 'bg-yellow-100/50 dark:bg-yellow-900/30 hover:bg-yellow-100/70 dark:hover:bg-yellow-900/40'
+            : 'bg-gray-50/70 dark:bg-gray-800/60 hover:bg-gray-100/80 dark:hover:bg-gray-700/60'
+        }`}
       >
         <div className='flex items-center gap-3'>
           {icon}
-          <h3 className='text-lg font-medium text-gray-900 dark:text-gray-100'>
+          <h3 className={`text-lg font-medium ${
+            isParent
+              ? 'text-yellow-900 dark:text-yellow-200'
+              : 'text-gray-900 dark:text-gray-100'
+          }`}>
             {title}
           </h3>
         </div>
-        <div className='text-gray-500 dark:text-gray-400'>
+        <div className={isParent ? 'text-yellow-700 dark:text-yellow-400' : 'text-gray-500 dark:text-gray-400'}>
           {isExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
         </div>
       </button>
 
-      {isExpanded && <div className='px-6 py-4'>{children}</div>}
+      {isExpanded && <div className={isParent ? 'px-0.5 md:px-6 py-4' : 'px-6 py-4'}>{children}</div>}
     </div>
   );
 };
@@ -2763,9 +2782,11 @@ const OpenListConfigComponent = ({
   const [url, setUrl] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [rootPath, setRootPath] = useState('/');
+  const [rootPaths, setRootPaths] = useState<string[]>(['/']);
   const [offlineDownloadPath, setOfflineDownloadPath] = useState('/');
   const [scanInterval, setScanInterval] = useState(0);
+  const [scanMode, setScanMode] = useState<'torrent' | 'name' | 'hybrid'>('hybrid');
+  const [disableVideoPreview, setDisableVideoPreview] = useState(false);
   const [videos, setVideos] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [scanProgress, setScanProgress] = useState<{
@@ -2782,9 +2803,11 @@ const OpenListConfigComponent = ({
       setUrl(config.OpenListConfig.URL || '');
       setUsername(config.OpenListConfig.Username || '');
       setPassword(config.OpenListConfig.Password || '');
-      setRootPath(config.OpenListConfig.RootPath || '/');
+      setRootPaths(config.OpenListConfig.RootPaths || (config.OpenListConfig.RootPath ? [config.OpenListConfig.RootPath] : ['/']));
       setOfflineDownloadPath(config.OpenListConfig.OfflineDownloadPath || '/');
       setScanInterval(config.OpenListConfig.ScanInterval || 0);
+      setScanMode(config.OpenListConfig.ScanMode || 'hybrid');
+      setDisableVideoPreview(config.OpenListConfig.DisableVideoPreview || false);
     }
   }, [config]);
 
@@ -2822,9 +2845,11 @@ const OpenListConfigComponent = ({
             URL: url,
             Username: username,
             Password: password,
-            RootPath: rootPath,
+            RootPaths: rootPaths,
             OfflineDownloadPath: offlineDownloadPath,
             ScanInterval: scanInterval,
+            ScanMode: scanMode,
+            DisableVideoPreview: disableVideoPreview,
           }),
         });
 
@@ -3101,18 +3126,49 @@ const OpenListConfigComponent = ({
 
         <div>
           <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
-            根目录
+            根目录列表
           </label>
-          <input
-            type='text'
-            value={rootPath}
-            onChange={(e) => setRootPath(e.target.value)}
-            disabled={!enabled}
-            placeholder='/'
-            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed'
-          />
+          <div className='space-y-2'>
+            {rootPaths.map((path, index) => (
+              <div key={index} className='flex gap-2'>
+                <input
+                  type='text'
+                  value={path}
+                  onChange={(e) => {
+                    const newPaths = [...rootPaths];
+                    newPaths[index] = e.target.value;
+                    setRootPaths(newPaths);
+                  }}
+                  disabled={!enabled}
+                  placeholder='/'
+                  className='flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed'
+                />
+                {rootPaths.length > 1 && (
+                  <button
+                    type='button'
+                    onClick={() => {
+                      const newPaths = rootPaths.filter((_, i) => i !== index);
+                      setRootPaths(newPaths);
+                    }}
+                    disabled={!enabled}
+                    className='px-3 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed'
+                  >
+                    删除
+                  </button>
+                )}
+              </div>
+            ))}
+            <button
+              type='button'
+              onClick={() => setRootPaths([...rootPaths, '/'])}
+              disabled={!enabled}
+              className='w-full px-3 py-2 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg text-gray-600 dark:text-gray-400 hover:border-blue-500 hover:text-blue-500 disabled:opacity-50 disabled:cursor-not-allowed'
+            >
+              + 添加根目录
+            </button>
+          </div>
           <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
-            OpenList 中的视频文件夹路径，默认为根目录 /
+            OpenList 中的视频文件夹路径，可以配置多个根目录
           </p>
         </div>
 
@@ -3149,6 +3205,49 @@ const OpenListConfigComponent = ({
           <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
             设置为 0 关闭定时扫描，最低 60 分钟
           </p>
+        </div>
+
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            扫描模式
+          </label>
+          <select
+            value={scanMode}
+            onChange={(e) => setScanMode(e.target.value as 'torrent' | 'name' | 'hybrid')}
+            disabled={!enabled}
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed'
+          >
+            <option value='hybrid'>混合模式（推荐）</option>
+            <option value='torrent'>种子库匹配</option>
+            <option value='name'>名字匹配</option>
+          </select>
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            混合模式：先用种子库匹配，失败后降级为名字匹配
+          </p>
+        </div>
+
+        <div className='flex items-center justify-between py-3 border-b border-gray-200 dark:border-gray-700'>
+          <div>
+            <h3 className='text-sm font-medium text-gray-900 dark:text-white'>
+              禁用预览视频
+            </h3>
+            <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+              开启后将直接返回直连链接，不使用视频预览流
+            </p>
+          </div>
+          <button
+            onClick={() => setDisableVideoPreview(!disableVideoPreview)}
+            disabled={!enabled}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+              disableVideoPreview ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'
+            } ${!enabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                disableVideoPreview ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+          </button>
         </div>
 
         <div className='flex gap-3'>
@@ -3377,6 +3476,850 @@ const OpenListConfigComponent = ({
   );
 };
 
+// Emby 媒体库配置组件 - 多源管理版本
+const EmbyConfigComponent = ({
+  config,
+  refreshConfig,
+}: {
+  config: AdminConfig | null;
+  refreshConfig: () => Promise<void>;
+}) => {
+  const { alertModal, showAlert, hideAlert } = useAlertModal();
+  const { isLoading, withLoading } = useLoadingState();
+
+  // 源列表状态
+  const [sources, setSources] = useState<any[]>([]);
+  const [editingSource, setEditingSource] = useState<any | null>(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [selectedSources, setSelectedSources] = useState<Set<string>>(new Set());
+
+  // 表单状态
+  const [formData, setFormData] = useState({
+    key: '',
+    name: '',
+    enabled: true,
+    ServerURL: '',
+    ApiKey: '',
+    Username: '',
+    Password: '',
+    UserId: '',
+    isDefault: false,
+    // 高级选项
+    removeEmbyPrefix: false,
+    appendMediaSourceId: false,
+    transcodeMp4: false,
+    proxyPlay: false,
+  });
+
+  // 从配置加载源列表
+  useEffect(() => {
+    if (config?.EmbyConfig?.Sources) {
+      setSources(config.EmbyConfig.Sources);
+    } else if (config?.EmbyConfig?.ServerURL) {
+      // 兼容旧格式
+      setSources([{
+        key: 'default',
+        name: 'Emby',
+        enabled: config.EmbyConfig.Enabled || false,
+        ServerURL: config.EmbyConfig.ServerURL,
+        ApiKey: config.EmbyConfig.ApiKey,
+        Username: config.EmbyConfig.Username,
+        Password: config.EmbyConfig.Password,
+        UserId: config.EmbyConfig.UserId,
+        isDefault: true,
+      }]);
+    }
+  }, [config]);
+
+  // 重置表单
+  const resetForm = () => {
+    setFormData({
+      key: '',
+      name: '',
+      enabled: true,
+      ServerURL: '',
+      ApiKey: '',
+      Username: '',
+      Password: '',
+      UserId: '',
+      isDefault: false,
+      // 高级选项
+      removeEmbyPrefix: false,
+      appendMediaSourceId: false,
+      transcodeMp4: false,
+      proxyPlay: false,
+    });
+    setEditingSource(null);
+    setShowAddForm(false);
+  };
+
+  // 开始编辑
+  const handleEdit = (source: any) => {
+    setFormData({ ...source });
+    setEditingSource(source);
+    setShowAddForm(false);
+  };
+
+  // 开始添加
+  const handleAdd = () => {
+    resetForm();
+    setShowAddForm(true);
+  };
+
+  // 保存源（添加或更新）
+  const handleSave = async () => {
+    // 验证必填字段
+    if (!formData.key || !formData.name || !formData.ServerURL) {
+      showError('请填写必填字段：标识符、名称、服务器地址', showAlert);
+      return;
+    }
+
+    // 验证key唯一性
+    if (!editingSource && sources.some(s => s.key === formData.key)) {
+      showError('标识符已存在，请使用其他标识符', showAlert);
+      return;
+    }
+
+    await withLoading('saveEmbySource', async () => {
+      try {
+        let newSources;
+        if (editingSource) {
+          // 更新现有源
+          newSources = sources.map(s =>
+            s.key === editingSource.key ? formData : s
+          );
+        } else {
+          // 添加新源
+          newSources = [...sources, formData];
+        }
+
+        // 保存到配置
+        const response = await fetch('/api/admin/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...config,
+            EmbyConfig: {
+              Sources: newSources,
+            },
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error('保存失败');
+        }
+
+        await refreshConfig();
+        resetForm();
+        showSuccess(editingSource ? '更新成功' : '添加成功', showAlert);
+      } catch (error) {
+        showError(error instanceof Error ? error.message : '保存失败', showAlert);
+      }
+    });
+  };
+
+  // 删除源
+  const handleDelete = async (source: any) => {
+    if (sources.length === 1) {
+      showError('至少需要保留一个Emby源', showAlert);
+      return;
+    }
+
+    if (!confirm(`确定要删除 "${source.name}" 吗？`)) {
+      return;
+    }
+
+    await withLoading('deleteEmbySource', async () => {
+      try {
+        const newSources = sources.filter(s => s.key !== source.key);
+
+        const response = await fetch('/api/admin/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...config,
+            EmbyConfig: {
+              Sources: newSources,
+            },
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error('删除失败');
+        }
+
+        await refreshConfig();
+        showSuccess('删除成功', showAlert);
+      } catch (error) {
+        showError(error instanceof Error ? error.message : '删除失败', showAlert);
+      }
+    });
+  };
+
+  // 切换启用状态
+  const handleToggleEnabled = async (source: any) => {
+    await withLoading('toggleEmbySource', async () => {
+      try {
+        const newSources = sources.map(s =>
+          s.key === source.key ? { ...s, enabled: !s.enabled } : s
+        );
+
+        const response = await fetch('/api/admin/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...config,
+            EmbyConfig: {
+              Sources: newSources,
+            },
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error('更新失败');
+        }
+
+        await refreshConfig();
+        showSuccess(source.enabled ? '已禁用' : '已启用', showAlert);
+      } catch (error) {
+        showError(error instanceof Error ? error.message : '更新失败', showAlert);
+      }
+    });
+  };
+
+  // 测试连接
+  const handleTest = async (source: any) => {
+    await withLoading('testEmbySource', async () => {
+      try {
+        const response = await fetch('/api/admin/emby', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'test',
+            ServerURL: source.ServerURL,
+            ApiKey: source.ApiKey,
+            Username: source.Username,
+            Password: source.Password,
+          }),
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+          showSuccess(data.message || 'Emby 连接测试成功', showAlert);
+        } else {
+          showError(data.message || 'Emby 连接测试失败', showAlert);
+        }
+      } catch (error) {
+        showError(error instanceof Error ? error.message : '测试失败', showAlert);
+      }
+    });
+  };
+
+  // 清除缓存
+  const handleClearCache = async () => {
+    await withLoading('clearEmbyCache', async () => {
+      try {
+        const response = await fetch('/api/admin/emby', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'clearCache',
+          }),
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+          showSuccess(data.message || '缓存清除成功', showAlert);
+        } else {
+          showError(data.message || '缓存清除失败', showAlert);
+        }
+      } catch (error) {
+        showError(error instanceof Error ? error.message : '缓存清除失败', showAlert);
+      }
+    });
+  };
+
+  // 导出配置
+  const handleExport = async () => {
+    await withLoading('exportEmby', async () => {
+      try {
+        const response = await fetch('/api/admin/emby/export');
+        if (!response.ok) {
+          const data = await response.json();
+          showError(data.error || '导出失败', showAlert);
+          return;
+        }
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `emby-config-${Date.now()}.json`;
+        a.click();
+        window.URL.revokeObjectURL(url);
+        showSuccess('导出成功', showAlert);
+      } catch (error) {
+        showError(error instanceof Error ? error.message : '导出失败', showAlert);
+      }
+    });
+  };
+
+  // 导入配置
+  const handleImport = async () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+
+      await withLoading('importEmby', async () => {
+        try {
+          const text = await file.text();
+          const data = JSON.parse(text);
+
+          const response = await fetch('/api/admin/emby/import', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data }),
+          });
+
+          const result = await response.json();
+
+          if (result.success) {
+            showSuccess('导入成功', showAlert);
+            await refreshConfig();
+          } else {
+            showError(result.error || '导入失败', showAlert);
+          }
+        } catch (error) {
+          showError(error instanceof Error ? error.message : '导入失败', showAlert);
+        }
+      });
+    };
+    input.click();
+  };
+
+  // 批量启用
+  const handleBatchEnable = async () => {
+    if (selectedSources.size === 0) return;
+    await withLoading('batchEnableEmby', async () => {
+      try {
+        const newSources = sources.map(s =>
+          selectedSources.has(s.key) ? { ...s, enabled: true } : s
+        );
+        const response = await fetch('/api/admin/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...config, EmbyConfig: { Sources: newSources } }),
+        });
+        if (!response.ok) throw new Error('批量启用失败');
+        await refreshConfig();
+        setSelectedSources(new Set());
+        showSuccess(`已启用 ${selectedSources.size} 个源`, showAlert);
+      } catch (error) {
+        showError(error instanceof Error ? error.message : '批量启用失败', showAlert);
+      }
+    });
+  };
+
+  // 批量禁用
+  const handleBatchDisable = async () => {
+    if (selectedSources.size === 0) return;
+    await withLoading('batchDisableEmby', async () => {
+      try {
+        const newSources = sources.map(s =>
+          selectedSources.has(s.key) ? { ...s, enabled: false } : s
+        );
+        const response = await fetch('/api/admin/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...config, EmbyConfig: { Sources: newSources } }),
+        });
+        if (!response.ok) throw new Error('批量禁用失败');
+        await refreshConfig();
+        setSelectedSources(new Set());
+        showSuccess(`已禁用 ${selectedSources.size} 个源`, showAlert);
+      } catch (error) {
+        showError(error instanceof Error ? error.message : '批量禁用失败', showAlert);
+      }
+    });
+  };
+
+  // 批量删除
+  const handleBatchDelete = async () => {
+    if (selectedSources.size === 0) return;
+    showAlert({
+      type: 'warning',
+      title: '确认批量删除',
+      message: `确定要删除选中的 ${selectedSources.size} 个源吗？此操作不可恢复。`,
+      showConfirm: true,
+      onConfirm: async () => {
+        await withLoading('batchDeleteEmby', async () => {
+          try {
+            const newSources = sources.filter(s => !selectedSources.has(s.key));
+            const response = await fetch('/api/admin/config', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ...config, EmbyConfig: { Sources: newSources } }),
+            });
+            if (!response.ok) throw new Error('批量删除失败');
+            await refreshConfig();
+            setSelectedSources(new Set());
+            showSuccess(`已删除 ${selectedSources.size} 个源`, showAlert);
+          } catch (error) {
+            showError(error instanceof Error ? error.message : '批量删除失败', showAlert);
+          }
+        });
+      },
+    });
+  };
+
+  return (
+    <div className='space-y-6'>
+      <AlertModal
+        isOpen={alertModal.isOpen}
+        onClose={hideAlert}
+        type={alertModal.type}
+        title={alertModal.title}
+        message={alertModal.message}
+        timer={alertModal.timer}
+        showConfirm={alertModal.showConfirm}
+        onConfirm={alertModal.onConfirm}
+      />
+
+      {/* 源列表 */}
+      <div className='space-y-4'>
+        <div className='flex items-center justify-between'>
+          <h3 className='text-lg font-medium text-gray-900 dark:text-gray-100'>
+            Emby 源列表 ({sources.length})
+          </h3>
+          <div className='flex gap-2'>
+            <button
+              onClick={handleAdd}
+              className={buttonStyles.success}
+            >
+              添加新源
+            </button>
+          </div>
+        </div>
+
+        {selectedSources.size > 0 && (
+          <div className='flex items-center gap-2 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg'>
+            <span className='text-sm text-gray-700 dark:text-gray-300'>
+              已选择 {selectedSources.size} 项
+            </span>
+            <button
+              onClick={handleBatchEnable}
+              disabled={isLoading('batchEnableEmby')}
+              className={buttonStyles.successSmall}
+            >
+              批量启用
+            </button>
+            <button
+              onClick={handleBatchDisable}
+              disabled={isLoading('batchDisableEmby')}
+              className={buttonStyles.warningSmall}
+            >
+              批量禁用
+            </button>
+            <button
+              onClick={handleBatchDelete}
+              disabled={isLoading('batchDeleteEmby')}
+              className={buttonStyles.dangerSmall}
+            >
+              批量删除
+            </button>
+            <button
+              onClick={() => setSelectedSources(new Set())}
+              className={buttonStyles.secondarySmall}
+            >
+              取消选择
+            </button>
+          </div>
+        )}
+
+        {sources.length === 0 ? (
+          <div className='text-center py-8 text-gray-500 dark:text-gray-400'>
+            暂无Emby源，点击"添加新源"开始配置
+          </div>
+        ) : (
+          sources.map((source) => (
+            <div
+              key={source.key}
+              className='border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800'
+            >
+              <div className='flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3'>
+                <div className='flex items-center gap-3 flex-1'>
+                  <input
+                    type='checkbox'
+                    checked={selectedSources.has(source.key)}
+                    onChange={(e) => {
+                      const newSelected = new Set(selectedSources);
+                      if (e.target.checked) {
+                        newSelected.add(source.key);
+                      } else {
+                        newSelected.delete(source.key);
+                      }
+                      setSelectedSources(newSelected);
+                    }}
+                    className='w-4 h-4 text-blue-600 rounded border-gray-300 dark:border-gray-600'
+                  />
+                  <div className='flex-1'>
+                    <div className='flex items-center gap-3 flex-wrap'>
+                      <h4 className='text-base font-medium text-gray-900 dark:text-gray-100'>
+                        {source.name}
+                      </h4>
+                      {source.isDefault && (
+                        <span className='px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200 rounded'>
+                          默认
+                        </span>
+                      )}
+                      <span
+                        className={`px-2 py-0.5 text-xs font-medium rounded ${
+                          source.enabled
+                            ? 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200'
+                            : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'
+                        }`}
+                      >
+                        {source.enabled ? '已启用' : '已禁用'}
+                      </span>
+                    </div>
+                    <p className='mt-1 text-sm text-gray-600 dark:text-gray-400'>
+                      标识符: {source.key}
+                    </p>
+                    <p className='mt-1 text-sm text-gray-600 dark:text-gray-400'>
+                      服务器: {source.ServerURL}
+                    </p>
+                    {source.UserId && (
+                      <p className='mt-1 text-sm text-gray-600 dark:text-gray-400'>
+                        用户ID: {source.UserId}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <div className='flex gap-2 flex-wrap sm:flex-nowrap'>
+                  <button
+                    onClick={() => handleToggleEnabled(source)}
+                    disabled={isLoading('toggleEmbySource')}
+                    className={source.enabled ? buttonStyles.warningSmall : buttonStyles.successSmall}
+                  >
+                    {source.enabled ? '禁用' : '启用'}
+                  </button>
+                  <button
+                    onClick={() => handleTest(source)}
+                    disabled={isLoading('testEmbySource')}
+                    className={buttonStyles.primarySmall}
+                  >
+                    测试
+                  </button>
+                  <button
+                    onClick={() => handleEdit(source)}
+                    className={buttonStyles.primarySmall}
+                  >
+                    编辑
+                  </button>
+                  <button
+                    onClick={() => handleDelete(source)}
+                    disabled={isLoading('deleteEmbySource')}
+                    className={buttonStyles.dangerSmall}
+                  >
+                    删除
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* 添加/编辑表单 */}
+      {(showAddForm || editingSource) && (
+        <div className='border border-gray-200 dark:border-gray-700 rounded-lg p-6 bg-gray-50 dark:bg-gray-800/50'>
+          <h3 className='text-lg font-medium text-gray-900 dark:text-gray-100 mb-4'>
+            {editingSource ? '编辑 Emby 源' : '添加新的 Emby 源'}
+          </h3>
+
+          <div className='space-y-4'>
+            {/* 标识符 */}
+            <div>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+                标识符 *
+              </label>
+              <input
+                type='text'
+                value={formData.key}
+                onChange={(e) => setFormData({ ...formData, key: e.target.value })}
+                disabled={!!editingSource}
+                placeholder='home, office, etc.'
+                className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 disabled:bg-gray-100 dark:disabled:bg-gray-700'
+              />
+              <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+                唯一标识符，只能包含字母、数字、下划线，创建后不可修改
+              </p>
+            </div>
+
+            {/* 名称 */}
+            <div>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+                显示名称 *
+              </label>
+              <input
+                type='text'
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                placeholder='家庭Emby, 公司Emby, etc.'
+                className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+              />
+            </div>
+
+            {/* 服务器地址 */}
+            <div>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+                Emby 服务器地址 *
+              </label>
+              <input
+                type='text'
+                value={formData.ServerURL}
+                onChange={(e) => setFormData({ ...formData, ServerURL: e.target.value })}
+                placeholder='http://192.168.1.100:8096'
+                className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+              />
+            </div>
+
+            {/* API Key */}
+            <div>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+                API Key（推荐）
+              </label>
+              <input
+                type='password'
+                value={formData.ApiKey}
+                onChange={(e) => setFormData({ ...formData, ApiKey: e.target.value })}
+                placeholder='输入 Emby API Key'
+                className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+              />
+              <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+                推荐使用 API Key 认证。如果不使用 API Key，请填写下方的用户名和密码。
+              </p>
+            </div>
+
+            {/* 用户名 */}
+            <div>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+                用户名（可选）
+              </label>
+              <input
+                type='text'
+                value={formData.Username}
+                onChange={(e) => setFormData({ ...formData, Username: e.target.value })}
+                placeholder='Emby 用户名'
+                className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+              />
+            </div>
+
+            {/* 密码 */}
+            <div>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+                密码（可选）
+              </label>
+              <input
+                type='password'
+                value={formData.Password}
+                onChange={(e) => setFormData({ ...formData, Password: e.target.value })}
+                placeholder='Emby 密码'
+                className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+              />
+            </div>
+
+            {/* 用户 ID */}
+            <div>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+                用户 ID（使用 API Key 时必填）
+              </label>
+              <input
+                type='text'
+                value={formData.UserId}
+                onChange={(e) => setFormData({ ...formData, UserId: e.target.value })}
+                placeholder='aab507c58e874de6a9bd12388d72f4d2'
+                className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+              />
+              <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+                从你的 Emby 抓包数据中获取用户 ID，通常在 URL 中如 /Users/[userId]/...
+              </p>
+            </div>
+
+            {/* 启用开关 */}
+            <div className='flex items-center justify-between'>
+              <label className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+                启用此源
+              </label>
+              <button
+                onClick={() => setFormData({ ...formData, enabled: !formData.enabled })}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  formData.enabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    formData.enabled ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {/* 高级选项 */}
+            <div className='border-t border-gray-200 dark:border-gray-700 pt-4 mt-4'>
+              <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300 mb-3'>
+                高级选项
+              </h4>
+
+              {/* 选项1: 播放链接移除/emby前缀 */}
+              <div className='flex items-center justify-between mb-3'>
+                <div className='flex-1'>
+                  <label className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+                    播放链接移除/emby前缀
+                  </label>
+                  <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+                    启用后将从播放链接中移除 /emby 前缀
+                  </p>
+                </div>
+                <button
+                  onClick={() => setFormData({ ...formData, removeEmbyPrefix: !formData.removeEmbyPrefix })}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                    formData.removeEmbyPrefix ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      formData.removeEmbyPrefix ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {/* 选项2: 拼接MediaSourceId参数 */}
+              <div className='flex items-center justify-between mb-3'>
+                <div className='flex-1'>
+                  <label className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+                    拼接MediaSourceId参数
+                  </label>
+                  <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+                    启用后将调用 PlaybackInfo API 获取 MediaSourceId 并添加到播放链接
+                  </p>
+                </div>
+                <button
+                  onClick={() => setFormData({ ...formData, appendMediaSourceId: !formData.appendMediaSourceId })}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                    formData.appendMediaSourceId ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      formData.appendMediaSourceId ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {/* 选项3: 转码mp4 */}
+              <div className='flex items-center justify-between mb-3'>
+                <div className='flex-1'>
+                  <label className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+                    转码mp4
+                  </label>
+                  <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+                    启用后将使用 stream.mp4 格式并移除 Static 参数
+                  </p>
+                </div>
+                <button
+                  onClick={() => setFormData({ ...formData, transcodeMp4: !formData.transcodeMp4 })}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                    formData.transcodeMp4 ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      formData.transcodeMp4 ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {/* 视频播放代理开关 */}
+              <div className='flex items-center justify-between py-3 border-b border-gray-200 dark:border-gray-700'>
+                <div className='flex-1'>
+                  <h4 className='text-sm font-medium text-gray-900 dark:text-white'>
+                    视频播放代理
+                  </h4>
+                  <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+                    启用后视频播放将通过服务器代理
+                  </p>
+                </div>
+                <button
+                  onClick={() => setFormData({ ...formData, proxyPlay: !formData.proxyPlay })}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                    formData.proxyPlay ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      formData.proxyPlay ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+            </div>
+            </div>
+
+            {/* 操作按钮 */}
+            <div className='flex gap-3 pt-4'>
+              <button
+                onClick={handleSave}
+                disabled={isLoading('saveEmbySource')}
+                className={buttonStyles.success}
+              >
+                {isLoading('saveEmbySource') ? '保存中...' : '保存'}
+              </button>
+              <button
+                onClick={resetForm}
+                className={buttonStyles.secondary}
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 全局操作 */}
+      <div className='flex gap-3 pt-4 border-t border-gray-200 dark:border-gray-700'>
+        <button
+          onClick={handleClearCache}
+          disabled={isLoading('clearEmbyCache')}
+          className={buttonStyles.warning}
+        >
+          {isLoading('clearEmbyCache') ? '清除中...' : '清除所有缓存'}
+        </button>
+        <button
+          onClick={handleExport}
+          disabled={isLoading('exportEmby')}
+          className={buttonStyles.secondary}
+        >
+          {isLoading('exportEmby') ? '导出中...' : '导出配置'}
+        </button>
+        <button
+          onClick={handleImport}
+          disabled={isLoading('importEmby')}
+          className={buttonStyles.secondary}
+        >
+          {isLoading('importEmby') ? '导入中...' : '导入配置'}
+        </button>
+      </div>
+    </div>
+  );
+};
+
 // 视频源配置组件
 const VideoSourceConfig = ({
   config,
@@ -3478,8 +4421,14 @@ const VideoSourceConfig = ({
         throw new Error(data.error || `操作失败: ${resp.status}`);
       }
 
+      // 获取响应数据
+      const data = await resp.json();
+
       // 成功后刷新配置
       await refreshConfig();
+
+      // 返回响应数据供调用者使用
+      return data;
     } catch (err) {
       showError(err instanceof Error ? err.message : '操作失败', showAlert);
       throw err; // 向上抛出方便调用处判断
@@ -3549,6 +4498,52 @@ const VideoSourceConfig = ({
       }
     }).catch(() => {
       console.error('操作失败', 'toggle_proxy_mode', key);
+    });
+  };
+
+  const handleUpdateWeight = (key: string, weight: number) => {
+    // 先乐观更新本地状态
+    setSources((prev) =>
+      prev.map((s) =>
+        s.key === key ? { ...s, weight } : s
+      )
+    );
+
+    // 调用API更新
+    withLoading(`updateWeight_${key}`, async () => {
+      try {
+        const response = await fetch('/api/admin/source', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'update_weight',
+            key,
+            weight,
+          }),
+        });
+
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          throw new Error(data.error || `操作失败: ${response.status}`);
+        }
+
+        await refreshConfig();
+      } catch (error) {
+        // 失败时回滚本地状态到配置中的值
+        const originalWeight = config?.SourceConfig?.find(s => s.key === key)?.weight ?? 0;
+        setSources((prev) =>
+          prev.map((s) =>
+            s.key === key ? { ...s, weight: originalWeight } : s
+          )
+        );
+        showError(
+          error instanceof Error ? error.message : '更新权重失败',
+          showAlert
+        );
+        throw error;
+      }
+    }).catch(() => {
+      console.error('操作失败', 'update_weight', key, weight);
     });
   };
 
@@ -3778,8 +4773,48 @@ const VideoSourceConfig = ({
     }
   };
 
+  // 权重输入组件 - 使用本地状态避免输入时失焦
+  const WeightInput = memo(({ sourceKey, initialWeight }: { sourceKey: string; initialWeight: number }) => {
+    const [localWeight, setLocalWeight] = useState(initialWeight);
+
+    // 当外部权重变化时同步
+    useEffect(() => {
+      setLocalWeight(initialWeight);
+    }, [initialWeight]);
+
+    return (
+      <input
+        type='number'
+        inputMode='numeric'
+        min='0'
+        max='100'
+        value={localWeight}
+        onChange={(e) => {
+          const value = parseInt(e.target.value) || 0;
+          const clampedValue = Math.min(100, Math.max(0, value));
+          setLocalWeight(clampedValue);
+        }}
+        onBlur={(e) => {
+          const newValue = parseInt(e.target.value) || 0;
+          const clampedValue = Math.min(100, Math.max(0, newValue));
+          const originalWeight = config?.SourceConfig?.find(s => s.key === sourceKey)?.weight ?? 0;
+
+          // 只有在值发生变化时才调用API
+          if (clampedValue !== originalWeight) {
+            handleUpdateWeight(sourceKey, clampedValue);
+          }
+        }}
+        onPointerDown={(e) => e.stopPropagation()}
+        onTouchStart={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+        className='w-16 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+        title='权重范围：0-100，用于排序和优选评分'
+      />
+    );
+  });
+
   // 可拖拽行封装 (dnd-kit)
-  const DraggableRow = ({ source }: { source: DataSource }) => {
+  const DraggableRow = memo(({ source }: { source: DataSource }) => {
     const { attributes, listeners, setNodeRef, transform, transition } =
       useSortable({ id: source.key });
 
@@ -3864,6 +4899,9 @@ const VideoSourceConfig = ({
             />
           </button>
         </td>
+        <td className='px-6 py-4 whitespace-nowrap' style={{ touchAction: 'auto' }}>
+          <WeightInput sourceKey={source.key} initialWeight={source.weight ?? 0} />
+        </td>
         <td className='px-6 py-4 whitespace-nowrap max-w-[1rem]'>
           {(() => {
             const status = getValidationStatus(source.key);
@@ -3916,7 +4954,7 @@ const VideoSourceConfig = ({
         </td>
       </tr>
     );
-  };
+  });
 
   // 全选/取消全选
   const handleSelectAll = useCallback(
@@ -3983,15 +5021,44 @@ const VideoSourceConfig = ({
       message: confirmMessage,
       onConfirm: async () => {
         try {
-          await withLoading(`batchSource_${action}`, () =>
+          const result = await withLoading(`batchSource_${action}`, () =>
             callSourceApi({ action, keys })
           );
-          showAlert({
-            type: 'success',
-            title: `${actionName}成功`,
-            message: `${actionName}了 ${keys.length} 个视频源`,
-            timer: 2000,
-          });
+
+          // 根据操作类型和结果显示不同的消息
+          if (action === 'batch_delete' && result?.deleted !== undefined && result?.skipped !== undefined) {
+            const { deleted, skipped } = result;
+            if (skipped > 0) {
+              showAlert({
+                type: 'warning',
+                title: '批量删除完成',
+                message: `成功删除了 ${deleted} 个视频源，跳过了 ${skipped} 个配置文件中的源（不可删除）`,
+                timer: 3000,
+              });
+            } else if (deleted > 0) {
+              showAlert({
+                type: 'success',
+                title: '批量删除成功',
+                message: `成功删除了 ${deleted} 个视频源`,
+                timer: 2000,
+              });
+            } else {
+              showAlert({
+                type: 'warning',
+                title: '无法删除',
+                message: '所选视频源均为配置文件中的源，不可删除',
+                timer: 3000,
+              });
+            }
+          } else {
+            showAlert({
+              type: 'success',
+              title: `${actionName}成功`,
+              message: `${actionName}了 ${keys.length} 个视频源`,
+              timer: 2000,
+            });
+          }
+
           // 重置选择状态
           setSelectedSources(new Set());
         } catch (err) {
@@ -4217,6 +5284,9 @@ const VideoSourceConfig = ({
               </th>
               <th className='px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider'>
                 代理模式
+              </th>
+              <th className='px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider'>
+                权重
               </th>
               <th className='px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider'>
                 有效性
@@ -5184,7 +6254,7 @@ const ConfigFileComponent = ({
   );
 };
 
-// 主题配置组件
+// 个性化配置组件
 const ThemeConfigComponent = ({
   config,
   refreshConfig,
@@ -5295,7 +6365,7 @@ const ThemeConfigComponent = ({
         showAlert({
           type: 'success',
           title: '保存成功',
-          message: '主题配置已更新',
+             message: '个性化配置已更新',
           timer: 2000,
         });
 
@@ -5654,7 +6724,7 @@ const ThemeConfigComponent = ({
               : buttonStyles.success
           }
         >
-          {isLoading('saveThemeConfig') ? '保存中...' : '保存主题配置'}
+          {isLoading('saveThemeConfig') ? '保存中...' : '保存个性化配置'}
         </button>
       </div>
 
@@ -5698,11 +6768,12 @@ const SiteConfigComponent = ({
     DanmakuApiToken: '87654321',
     TMDBApiKey: '',
     TMDBProxy: '',
-    BannerDataSource: 'TMDB',
+    BannerDataSource: 'Douban',
     RecommendationDataSource: 'Mixed',
     PansouApiUrl: '',
     PansouUsername: '',
     PansouPassword: '',
+    PansouKeywordBlocklist: '',
     EnableComments: false,
     EnableRegistration: false,
     RegistrationRequireTurnstile: false,
@@ -5740,15 +6811,16 @@ const SiteConfigComponent = ({
 
   // 豆瓣图片代理选项
   const doubanImageProxyTypeOptions = [
-    { value: 'direct', label: '直连（浏览器直接请求豆瓣）' },
     { value: 'server', label: '服务器代理（由服务器代理请求豆瓣）' },
-    { value: 'img3', label: '豆瓣官方精品 CDN（阿里云）' },
     {
       value: 'cmliussss-cdn-tencent',
       label: '豆瓣 CDN By CMLiussss（腾讯云）',
     },
     { value: 'cmliussss-cdn-ali', label: '豆瓣 CDN By CMLiussss（阿里云）' },
+    { value: 'baidu', label: '百度图片代理' },
     { value: 'custom', label: '自定义代理' },
+    { value: 'direct', label: '直连（浏览器直接请求豆瓣，可能需要浏览器插件才能正常显示）' },
+    { value: 'img3', label: '豆瓣官方精品 CDN（阿里云，可能需要浏览器插件才能正常显示）' },
   ];
 
   // 获取感谢信息
@@ -5787,10 +6859,12 @@ const SiteConfigComponent = ({
         DanmakuApiToken: config.SiteConfig.DanmakuApiToken || '87654321',
         TMDBApiKey: config.SiteConfig.TMDBApiKey || '',
         TMDBProxy: config.SiteConfig.TMDBProxy || '',
-        BannerDataSource: config.SiteConfig.BannerDataSource || 'TMDB',
+        BannerDataSource: config.SiteConfig.BannerDataSource || 'Douban',
+        RecommendationDataSource: config.SiteConfig.RecommendationDataSource || 'Mixed',
         PansouApiUrl: config.SiteConfig.PansouApiUrl || '',
         PansouUsername: config.SiteConfig.PansouUsername || '',
         PansouPassword: config.SiteConfig.PansouPassword || '',
+        PansouKeywordBlocklist: config.SiteConfig.PansouKeywordBlocklist || '',
         EnableComments: config.SiteConfig.EnableComments || false,
       });
     }
@@ -6269,7 +7343,7 @@ const SiteConfigComponent = ({
           轮播图数据源
         </label>
         <select
-          value={siteSettings.BannerDataSource || 'TMDB'}
+          value={siteSettings.BannerDataSource || 'Douban'}
           onChange={(e) =>
             setSiteSettings((prev) => ({
               ...prev,
@@ -6278,6 +7352,7 @@ const SiteConfigComponent = ({
           }
           className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
         >
+          <option value='Douban'>豆瓣</option>
           <option value='TMDB'>TMDB</option>
           <option value='TX'>TX</option>
         </select>
@@ -6408,7 +7483,7 @@ const SiteConfigComponent = ({
         {/* TMDB Proxy */}
         <div>
           <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
-            TMDB 代理
+            TMDB 系统代理
           </label>
           <input
             type='text'
@@ -6424,6 +7499,28 @@ const SiteConfigComponent = ({
           />
           <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
             配置代理服务器地址，用于访问 TMDB API（可选）
+          </p>
+        </div>
+
+        {/* TMDB Reverse Proxy */}
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            TMDB 反代代理
+          </label>
+          <input
+            type='text'
+            placeholder='请输入反代 Base URL（可选）'
+            value={siteSettings.TMDBReverseProxy}
+            onChange={(e) =>
+              setSiteSettings((prev) => ({
+                ...prev,
+                TMDBReverseProxy: e.target.value,
+              }))
+            }
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
+          />
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            配置 TMDB 反向代理 Base URL（可选）
           </p>
         </div>
       </div>
@@ -6505,6 +7602,28 @@ const SiteConfigComponent = ({
           />
           <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
             配置账号密码后，系统会自动登录并缓存 Token
+          </p>
+        </div>
+
+        {/* 关键词屏蔽 */}
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            关键词屏蔽（可选）
+          </label>
+          <input
+            type='text'
+            placeholder='多个关键词用中文或英文逗号分隔'
+            value={siteSettings.PansouKeywordBlocklist}
+            onChange={(e) =>
+              setSiteSettings((prev) => ({
+                ...prev,
+                PansouKeywordBlocklist: e.target.value,
+              }))
+            }
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
+          />
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            设置后会过滤包含这些关键词的搜索结果
           </p>
         </div>
       </div>
@@ -6827,6 +7946,7 @@ const RegistrationConfigComponent = ({
             </label>
             <button
               type='button'
+              disabled={!registrationSettings.TurnstileSiteKey || !registrationSettings.TurnstileSecretKey}
               onClick={() =>
                 setRegistrationSettings((prev) => ({
                   ...prev,
@@ -6834,7 +7954,9 @@ const RegistrationConfigComponent = ({
                 }))
               }
               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 ${
-                registrationSettings.RegistrationRequireTurnstile
+                !registrationSettings.TurnstileSiteKey || !registrationSettings.TurnstileSecretKey
+                  ? 'opacity-50 cursor-not-allowed bg-gray-300 dark:bg-gray-600'
+                  : registrationSettings.RegistrationRequireTurnstile
                   ? buttonStyles.toggleOn
                   : buttonStyles.toggleOff
               }`}
@@ -6852,6 +7974,9 @@ const RegistrationConfigComponent = ({
           </div>
           <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
             开启后注册时需要通过Cloudflare Turnstile人机验证。
+            {(!registrationSettings.TurnstileSiteKey || !registrationSettings.TurnstileSecretKey) && (
+              <span className='text-orange-500 dark:text-orange-400'> 需要先配置Site Key和Secret Key才能启用。</span>
+            )}
           </p>
         </div>
 
@@ -6863,6 +7988,7 @@ const RegistrationConfigComponent = ({
             </label>
             <button
               type='button'
+              disabled={!registrationSettings.TurnstileSiteKey || !registrationSettings.TurnstileSecretKey}
               onClick={() =>
                 setRegistrationSettings((prev) => ({
                   ...prev,
@@ -6870,7 +7996,9 @@ const RegistrationConfigComponent = ({
                 }))
               }
               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 ${
-                registrationSettings.LoginRequireTurnstile
+                !registrationSettings.TurnstileSiteKey || !registrationSettings.TurnstileSecretKey
+                  ? 'opacity-50 cursor-not-allowed bg-gray-300 dark:bg-gray-600'
+                  : registrationSettings.LoginRequireTurnstile
                   ? buttonStyles.toggleOn
                   : buttonStyles.toggleOff
               }`}
@@ -6888,6 +8016,9 @@ const RegistrationConfigComponent = ({
           </div>
           <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
             开启后登录时需要通过Cloudflare Turnstile人机验证。
+            {(!registrationSettings.TurnstileSiteKey || !registrationSettings.TurnstileSecretKey) && (
+              <span className='text-orange-500 dark:text-orange-400'> 需要先配置Site Key和Secret Key才能启用。</span>
+            )}
           </p>
         </div>
 
@@ -7416,18 +8547,51 @@ const CustomAdFilterConfig = ({
   const defaultAdFilterCode = `function filterAdsFromM3U8(type: string, m3u8Content: string): string {
   if (!m3u8Content) return '';
 
+  // 广告关键字列表
+  const adKeywords = [
+    'sponsor',
+    '/ad/',
+    '/ads/',
+    'advert',
+    'advertisement',
+    '/adjump',
+    'redtraffic'
+  ];
+
   // 按行分割M3U8内容
   const lines = m3u8Content.split('\\n');
   const filteredLines = [];
 
-  let nextdelete = false;
-  for (let i = 0; i < lines.length; i++) {
+  let i = 0;
+  while (i < lines.length) {
     const line = lines[i];
 
-    // 只过滤#EXT-X-DISCONTINUITY标识
-    if (!line.includes('#EXT-X-DISCONTINUITY')) {
-      filteredLines.push(line);
+    // 跳过 #EXT-X-DISCONTINUITY 标识
+    if (line.includes('#EXT-X-DISCONTINUITY')) {
+      i++;
+      continue;
     }
+
+    // 如果是 EXTINF 行，检查下一行 URL 是否包含广告关键字
+    if (line.includes('#EXTINF:')) {
+      // 检查下一行 URL 是否包含广告关键字
+      if (i + 1 < lines.length) {
+        const nextLine = lines[i + 1];
+        const containsAdKeyword = adKeywords.some(keyword =>
+          nextLine.toLowerCase().includes(keyword.toLowerCase())
+        );
+
+        if (containsAdKeyword) {
+          // 跳过 EXTINF 行和 URL 行
+          i += 2;
+          continue;
+        }
+      }
+    }
+
+    // 保留当前行
+    filteredLines.push(line);
+    i++;
   }
 
   return filteredLines.join('\\n');
@@ -7642,6 +8806,889 @@ const CustomAdFilterConfig = ({
   );
 };
 
+// 小雅配置组件
+const XiaoyaConfigComponent = ({
+  config,
+  refreshConfig,
+}: {
+  config: AdminConfig | null;
+  refreshConfig: () => Promise<void>;
+}) => {
+  const { alertModal, showAlert, hideAlert } = useAlertModal();
+  const { isLoading, withLoading } = useLoadingState();
+  const [enabled, setEnabled] = useState(false);
+  const [serverURL, setServerURL] = useState('');
+  const [token, setToken] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [disableVideoPreview, setDisableVideoPreview] = useState(false);
+
+  useEffect(() => {
+    if (config?.XiaoyaConfig) {
+      setEnabled(config.XiaoyaConfig.Enabled || false);
+      setServerURL(config.XiaoyaConfig.ServerURL || '');
+      setToken(config.XiaoyaConfig.Token || '');
+      setUsername(config.XiaoyaConfig.Username || '');
+      setPassword(config.XiaoyaConfig.Password || '');
+      setDisableVideoPreview(config.XiaoyaConfig.DisableVideoPreview || false);
+    }
+  }, [config]);
+
+  const handleSave = async () => {
+    await withLoading('saveXiaoya', async () => {
+      try {
+        const response = await fetch('/api/admin/xiaoya', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'save',
+            Enabled: enabled,
+            ServerURL: serverURL,
+            Token: token,
+            Username: username,
+            Password: password,
+            DisableVideoPreview: disableVideoPreview,
+          }),
+        });
+
+        if (!response.ok) {
+          const data = await response.json();
+          throw new Error(data.error || '保存失败');
+        }
+
+        showSuccess('保存成功', showAlert);
+        await refreshConfig();
+      } catch (error) {
+        showError(error instanceof Error ? error.message : '保存失败', showAlert);
+        throw error;
+      }
+    });
+  };
+
+  const handleTest = async () => {
+    await withLoading('testXiaoya', async () => {
+      try {
+        const response = await fetch('/api/admin/xiaoya', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'test',
+            ServerURL: serverURL,
+            Token: token,
+            Username: username,
+            Password: password,
+          }),
+        });
+
+        const data = await response.json();
+        if (data.success) {
+          showSuccess('连接成功', showAlert);
+        } else {
+          showError(data.message || '连接失败', showAlert);
+        }
+      } catch (error) {
+        showError(error instanceof Error ? error.message : '连接失败', showAlert);
+        throw error;
+      }
+    });
+  };
+
+  return (
+    <div className='space-y-6'>
+      <div className='bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4'>
+        <h3 className='text-sm font-medium text-blue-900 dark:text-blue-100 mb-2'>
+          关于小雅
+        </h3>
+        <div className='text-sm text-blue-800 dark:text-blue-200 space-y-1'>
+          <p>• 小雅是基于 Alist 的网盘资源聚合服务</p>
+          <p>• 支持文件夹名自动识别 TMDb ID（格式：标题 (年份) {'{tmdb-id}'}）</p>
+          <p>• 支持 NFO 文件元数据（poster.jpg、background.jpg）</p>
+          <p>• 按需加载，无需全量扫描</p>
+        </div>
+      </div>
+
+      <div className='space-y-4'>
+        <div className='flex items-center justify-between py-3 border-b border-gray-200 dark:border-gray-700'>
+          <div>
+            <h3 className='text-sm font-medium text-gray-900 dark:text-white'>
+              启用小雅功能
+            </h3>
+            <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+              关闭后将不显示小雅入口
+            </p>
+          </div>
+          <button
+            onClick={() => setEnabled(!enabled)}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+              enabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'
+            }`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                enabled ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+          </button>
+        </div>
+
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            Alist 服务器地址
+          </label>
+          <input
+            type='text'
+            value={serverURL}
+            onChange={(e) => setServerURL(e.target.value)}
+            placeholder='http://localhost:5244'
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+          />
+          <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+            小雅 Alist 服务器的完整地址
+          </p>
+        </div>
+
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            Token（推荐）
+          </label>
+          <input
+            type='password'
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            placeholder='可选，使用 Token 认证'
+            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+          />
+        </div>
+
+        <div className='grid grid-cols-2 gap-4'>
+          <div>
+            <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+              用户名
+            </label>
+            <input
+              type='text'
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder='可选，用户名密码认证'
+              className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+            />
+          </div>
+          <div>
+            <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+              密码
+            </label>
+            <input
+              type='password'
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder='可选'
+              className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+            />
+          </div>
+        </div>
+
+        <div className='flex items-center justify-between py-3 border-b border-gray-200 dark:border-gray-700'>
+          <div>
+            <h3 className='text-sm font-medium text-gray-900 dark:text-white'>
+              禁用预览视频
+            </h3>
+            <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+              开启后将直接返回直连链接，不使用视频预览流
+            </p>
+          </div>
+          <button
+            onClick={() => setDisableVideoPreview(!disableVideoPreview)}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+              disableVideoPreview ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'
+            }`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                disableVideoPreview ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+          </button>
+        </div>
+
+        <div className='flex gap-3'>
+          <button
+            onClick={handleTest}
+            disabled={!serverURL || isLoading('testXiaoya')}
+            className={buttonStyles.primary}
+          >
+            {isLoading('testXiaoya') ? '测试中...' : '测试连接'}
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={isLoading('saveXiaoya')}
+            className={buttonStyles.success}
+          >
+            {isLoading('saveXiaoya') ? '保存中...' : '保存配置'}
+          </button>
+        </div>
+      </div>
+
+      <AlertModal
+        isOpen={alertModal.isOpen}
+        onClose={hideAlert}
+        type={alertModal.type}
+        title={alertModal.title}
+        message={alertModal.message}
+        timer={alertModal.timer}
+        showConfirm={alertModal.showConfirm}
+      />
+    </div>
+  );
+};
+
+// 邮件配置组件
+const EmailConfigComponent = ({
+  config,
+  refreshConfig,
+}: {
+  config: AdminConfig | null;
+  refreshConfig: () => Promise<void>;
+}) => {
+  const { alertModal, showAlert, hideAlert } = useAlertModal();
+  const { isLoading, withLoading } = useLoadingState();
+  const [enabled, setEnabled] = useState(false);
+  const [provider, setProvider] = useState<'smtp' | 'resend'>('smtp');
+
+  // SMTP配置
+  const [smtpHost, setSmtpHost] = useState('');
+  const [smtpPort, setSmtpPort] = useState(587);
+  const [smtpSecure, setSmtpSecure] = useState(false);
+  const [smtpUser, setSmtpUser] = useState('');
+  const [smtpPassword, setSmtpPassword] = useState('');
+  const [smtpFrom, setSmtpFrom] = useState('');
+
+  // Resend配置
+  const [resendApiKey, setResendApiKey] = useState('');
+  const [resendFrom, setResendFrom] = useState('');
+
+  // 测试邮件
+  const [testEmail, setTestEmail] = useState('');
+
+  useEffect(() => {
+    if (config?.EmailConfig) {
+      setEnabled(config.EmailConfig.enabled || false);
+      setProvider(config.EmailConfig.provider || 'smtp');
+
+      if (config.EmailConfig.smtp) {
+        setSmtpHost(config.EmailConfig.smtp.host || '');
+        setSmtpPort(config.EmailConfig.smtp.port || 587);
+        setSmtpSecure(config.EmailConfig.smtp.secure || false);
+        setSmtpUser(config.EmailConfig.smtp.user || '');
+        setSmtpPassword(config.EmailConfig.smtp.password || '');
+        setSmtpFrom(config.EmailConfig.smtp.from || '');
+      }
+
+      if (config.EmailConfig.resend) {
+        setResendApiKey(config.EmailConfig.resend.apiKey || '');
+        setResendFrom(config.EmailConfig.resend.from || '');
+      }
+    }
+  }, [config]);
+
+  const handleSave = async () => {
+    await withLoading('saveEmail', async () => {
+      try {
+        const emailConfig: AdminConfig['EmailConfig'] = {
+          enabled,
+          provider,
+          smtp: provider === 'smtp' ? {
+            host: smtpHost,
+            port: smtpPort,
+            secure: smtpSecure,
+            user: smtpUser,
+            password: smtpPassword,
+            from: smtpFrom,
+          } : undefined,
+          resend: provider === 'resend' ? {
+            apiKey: resendApiKey,
+            from: resendFrom,
+          } : undefined,
+        };
+
+        const response = await fetch('/api/admin/email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'save',
+            config: emailConfig,
+          }),
+        });
+
+        if (!response.ok) {
+          const data = await response.json();
+          throw new Error(data.error || '保存失败');
+        }
+
+        showSuccess('保存成功', showAlert);
+        await refreshConfig();
+      } catch (error) {
+        showError(error instanceof Error ? error.message : '保存失败', showAlert);
+        throw error;
+      }
+    });
+  };
+
+  const handleTest = async () => {
+    if (!testEmail) {
+      showError('请输入测试邮箱地址', showAlert);
+      return;
+    }
+
+    await withLoading('testEmail', async () => {
+      try {
+        const emailConfig: AdminConfig['EmailConfig'] = {
+          enabled: true,
+          provider,
+          smtp: provider === 'smtp' ? {
+            host: smtpHost,
+            port: smtpPort,
+            secure: smtpSecure,
+            user: smtpUser,
+            password: smtpPassword,
+            from: smtpFrom,
+          } : undefined,
+          resend: provider === 'resend' ? {
+            apiKey: resendApiKey,
+            from: resendFrom,
+          } : undefined,
+        };
+
+        const response = await fetch('/api/admin/email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'test',
+            config: emailConfig,
+            testEmail,
+          }),
+        });
+
+        const data = await response.json();
+        if (data.success) {
+          showSuccess('测试邮件发送成功，请检查收件箱', showAlert);
+        } else {
+          showError(data.error || '发送失败', showAlert);
+        }
+      } catch (error) {
+        showError(error instanceof Error ? error.message : '发送失败', showAlert);
+        throw error;
+      }
+    });
+  };
+
+  return (
+    <div className='space-y-6'>
+      <div className='bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4'>
+        <h3 className='text-sm font-medium text-blue-900 dark:text-blue-100 mb-2'>
+          关于邮件通知
+        </h3>
+        <div className='text-sm text-blue-800 dark:text-blue-200 space-y-1'>
+          <p>• 当用户收藏的影片有更新时，自动发送邮件通知</p>
+          <p>• 支持 SMTP 和 Resend 两种发送方式</p>
+          <p>• 用户可在个人设置中配置邮箱和通知偏好</p>
+        </div>
+      </div>
+
+      <div className='space-y-4'>
+        {/* 启用开关 */}
+        <div className='flex items-center justify-between py-3 border-b border-gray-200 dark:border-gray-700'>
+          <div>
+            <h3 className='text-sm font-medium text-gray-900 dark:text-white'>
+              启用邮件通知
+            </h3>
+            <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+              开启后用户可以接收收藏更新的邮件通知
+            </p>
+          </div>
+          <button
+            onClick={() => setEnabled(!enabled)}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+              enabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'
+            }`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                enabled ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+          </button>
+        </div>
+
+        {/* 发送方式选择 */}
+        <div>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            发送方式
+          </label>
+          <div className='flex gap-4'>
+            <label className='flex items-center'>
+              <input
+                type='radio'
+                value='smtp'
+                checked={provider === 'smtp'}
+                onChange={(e) => setProvider(e.target.value as 'smtp')}
+                className='mr-2'
+              />
+              <span className='text-sm text-gray-700 dark:text-gray-300'>SMTP</span>
+            </label>
+            <label className='flex items-center'>
+              <input
+                type='radio'
+                value='resend'
+                checked={provider === 'resend'}
+                onChange={(e) => setProvider(e.target.value as 'resend')}
+                className='mr-2'
+              />
+              <span className='text-sm text-gray-700 dark:text-gray-300'>Resend</span>
+            </label>
+          </div>
+        </div>
+
+        {/* SMTP配置 */}
+        {provider === 'smtp' && (
+          <div className='space-y-4 p-4 bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700'>
+            <h4 className='text-sm font-medium text-gray-900 dark:text-white'>SMTP 配置</h4>
+
+            <div className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
+              <div>
+                <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'>
+                  SMTP 主机 *
+                </label>
+                <input
+                  type='text'
+                  value={smtpHost}
+                  onChange={(e) => setSmtpHost(e.target.value)}
+                  placeholder='smtp.gmail.com'
+                  className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white'
+                />
+              </div>
+
+              <div>
+                <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'>
+                  SMTP 端口 *
+                </label>
+                <input
+                  type='number'
+                  value={smtpPort}
+                  onChange={(e) => setSmtpPort(parseInt(e.target.value))}
+                  placeholder='587'
+                  className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white'
+                />
+              </div>
+            </div>
+
+            <div className='flex items-center'>
+              <input
+                type='checkbox'
+                checked={smtpSecure}
+                onChange={(e) => setSmtpSecure(e.target.checked)}
+                className='mr-2'
+              />
+              <label className='text-sm text-gray-700 dark:text-gray-300'>
+                使用 SSL/TLS（端口 465 时启用）
+              </label>
+            </div>
+
+            <div>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'>
+                SMTP 用户名 *
+              </label>
+              <input
+                type='text'
+                value={smtpUser}
+                onChange={(e) => setSmtpUser(e.target.value)}
+                placeholder='your-email@gmail.com'
+                className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white'
+              />
+            </div>
+
+            <div>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'>
+                SMTP 密码 *
+              </label>
+              <input
+                type='password'
+                value={smtpPassword}
+                onChange={(e) => setSmtpPassword(e.target.value)}
+                placeholder='应用专用密码'
+                className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white'
+              />
+            </div>
+
+            <div>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'>
+                发件人邮箱 *
+              </label>
+              <input
+                type='email'
+                value={smtpFrom}
+                onChange={(e) => setSmtpFrom(e.target.value)}
+                placeholder='noreply@yourdomain.com'
+                className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white'
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Resend配置 */}
+        {provider === 'resend' && (
+          <div className='space-y-4 p-4 bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700'>
+            <h4 className='text-sm font-medium text-gray-900 dark:text-white'>Resend 配置</h4>
+
+            <div>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'>
+                Resend API Key *
+              </label>
+              <input
+                type='password'
+                value={resendApiKey}
+                onChange={(e) => setResendApiKey(e.target.value)}
+                placeholder='re_xxxxx'
+                className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white'
+              />
+              <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+                在 <a href='https://resend.com/api-keys' target='_blank' rel='noopener noreferrer' className='text-blue-600 hover:underline'>Resend 控制台</a> 获取
+              </p>
+            </div>
+
+            <div>
+              <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1'>
+                发件人邮箱 *
+              </label>
+              <input
+                type='email'
+                value={resendFrom}
+                onChange={(e) => setResendFrom(e.target.value)}
+                placeholder='noreply@yourdomain.com'
+                className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white'
+              />
+              <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+                需要先在 Resend 中验证域名
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* 测试邮件 */}
+        <div className='p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg'>
+          <h4 className='text-sm font-medium text-blue-900 dark:text-blue-100 mb-2'>
+            发送测试邮件
+          </h4>
+          <div className='flex flex-col sm:flex-row gap-2'>
+            <input
+              type='email'
+              value={testEmail}
+              onChange={(e) => setTestEmail(e.target.value)}
+              placeholder='输入测试邮箱地址'
+              className='flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm'
+            />
+            <button
+              onClick={handleTest}
+              disabled={isLoading('testEmail') || !testEmail}
+              className={`${buttonStyles.primary} whitespace-nowrap`}
+            >
+              {isLoading('testEmail') ? '发送中...' : '发送测试'}
+            </button>
+          </div>
+        </div>
+
+        {/* 保存按钮 */}
+        <div className='flex gap-3'>
+          <button
+            onClick={handleSave}
+            disabled={isLoading('saveEmail')}
+            className={buttonStyles.success}
+          >
+            {isLoading('saveEmail') ? '保存中...' : '保存配置'}
+          </button>
+        </div>
+      </div>
+
+      <AlertModal
+        isOpen={alertModal.isOpen}
+        onClose={hideAlert}
+        type={alertModal.type}
+        title={alertModal.title}
+        message={alertModal.message}
+        timer={alertModal.timer}
+        showConfirm={alertModal.showConfirm}
+      />
+    </div>
+  );
+};
+
+// 求片列表组件
+const MovieRequestsComponent = ({ config, refreshConfig }: { config: AdminConfig | null; refreshConfig: () => Promise<void> }) => {
+  const { alertModal, showAlert, hideAlert } = useAlertModal();
+  const { isLoading, withLoading } = useLoadingState();
+  const [requests, setRequests] = useState<any[]>([]);
+  const [filter, setFilter] = useState<'pending' | 'fulfilled'>('pending');
+  const [pendingCount, setPendingCount] = useState(0);
+  const [fulfilledCount, setFulfilledCount] = useState(0);
+  const [loading, setLoading] = useState(true);
+
+  // 求片功能设置
+  const [enableMovieRequest, setEnableMovieRequest] = useState(config?.SiteConfig?.EnableMovieRequest ?? true);
+  const [movieRequestCooldown, setMovieRequestCooldown] = useState(config?.SiteConfig?.MovieRequestCooldown ?? 3600);
+  const [savingSettings, setSavingSettings] = useState(false);
+
+  useEffect(() => {
+    loadRequests();
+    loadCounts();
+  }, [filter]);
+
+  const loadCounts = async () => {
+    try {
+      const response = await fetch('/api/movie-requests');
+      const data = await response.json();
+      const allRequests = data.requests || [];
+      setPendingCount(allRequests.filter((r: any) => r.status === 'pending').length);
+      setFulfilledCount(allRequests.filter((r: any) => r.status === 'fulfilled').length);
+    } catch (error) {
+      console.error('加载求片数量失败:', error);
+    }
+  };
+
+  const loadRequests = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch(`/api/movie-requests?status=${filter}&detail=true`);
+      const data = await response.json();
+      setRequests(data.requests || []);
+    } catch (error) {
+      console.error('加载求片列表失败:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleFulfill = async (id: string) => {
+    await withLoading(`fulfill_${id}`, async () => {
+      try {
+        const response = await fetch(`/api/movie-requests/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'fulfilled' }),
+        });
+        if (!response.ok) throw new Error('操作失败');
+        showSuccess('已标记为已上架', showAlert);
+        await loadRequests();
+      } catch (err) {
+        showError(err instanceof Error ? err.message : '操作失败', showAlert);
+      }
+    });
+  };
+
+  const handleDelete = async (id: string) => {
+    await withLoading(`delete_${id}`, async () => {
+      try {
+        const response = await fetch(`/api/movie-requests/${id}`, { method: 'DELETE' });
+        if (!response.ok) throw new Error('删除失败');
+        showSuccess('删除成功', showAlert);
+        await loadRequests();
+      } catch (err) {
+        showError(err instanceof Error ? err.message : '删除失败', showAlert);
+      }
+    });
+  };
+
+  const handleSaveSettings = async () => {
+    setSavingSettings(true);
+    try {
+      if (!config) throw new Error('配置未加载');
+
+      const updatedConfig = {
+        ...config,
+        SiteConfig: {
+          ...config.SiteConfig,
+          EnableMovieRequest: enableMovieRequest,
+          MovieRequestCooldown: movieRequestCooldown,
+        },
+      };
+
+      const response = await fetch('/api/admin/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedConfig),
+      });
+
+      if (!response.ok) throw new Error('保存失败');
+
+      showSuccess('求片设置已保存', showAlert);
+      await refreshConfig();
+    } catch (err) {
+      showError(err instanceof Error ? err.message : '保存失败', showAlert);
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  return (
+    <div className='space-y-4'>
+      {/* 求片功能设置 */}
+      <div className='p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700'>
+        <h3 className='text-lg font-medium text-gray-900 dark:text-gray-100 mb-4'>求片功能设置</h3>
+        <div className='space-y-4'>
+          <div className='flex items-center justify-between'>
+            <div>
+              <label className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+                启用求片功能
+              </label>
+              <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+                关闭后用户将无法访问求片页面
+              </p>
+            </div>
+            <label className='relative inline-flex items-center cursor-pointer'>
+              <input
+                type='checkbox'
+                checked={enableMovieRequest}
+                onChange={(e) => setEnableMovieRequest(e.target.checked)}
+                className='sr-only peer'
+              />
+              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+            </label>
+          </div>
+
+          <div>
+            <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+              求片冷却时间（秒）
+            </label>
+            <p className='text-xs text-gray-500 dark:text-gray-400 mb-2'>
+              用户两次求片之间的最小间隔时间，默认3600秒（1小时）
+            </p>
+            <input
+              type='number'
+              min='0'
+              value={movieRequestCooldown}
+              onChange={(e) => setMovieRequestCooldown(parseInt(e.target.value) || 0)}
+              className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100'
+            />
+            <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+              {movieRequestCooldown >= 3600
+                ? `约 ${Math.floor(movieRequestCooldown / 3600)} 小时 ${Math.floor((movieRequestCooldown % 3600) / 60)} 分钟`
+                : movieRequestCooldown >= 60
+                ? `约 ${Math.floor(movieRequestCooldown / 60)} 分钟`
+                : `${movieRequestCooldown} 秒`}
+            </p>
+          </div>
+
+          <button
+            onClick={handleSaveSettings}
+            disabled={savingSettings}
+            className={buttonStyles.primary}
+          >
+            {savingSettings ? '保存中...' : '保存设置'}
+          </button>
+        </div>
+      </div>
+
+      {/* 求片列表 */}
+      <div className='p-4 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700'>
+        <h3 className='text-lg font-medium text-gray-900 dark:text-gray-100 mb-4'>求片列表</h3>
+        <div className='flex gap-2 mb-4'>
+        <button
+          onClick={() => setFilter('pending')}
+          className={`px-4 py-2 rounded-lg ${
+            filter === 'pending'
+              ? 'bg-blue-600 text-white'
+              : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+          }`}
+        >
+          待处理 ({pendingCount})
+        </button>
+        <button
+          onClick={() => setFilter('fulfilled')}
+          className={`px-4 py-2 rounded-lg ${
+            filter === 'fulfilled'
+              ? 'bg-blue-600 text-white'
+              : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+          }`}
+        >
+          已上架 ({fulfilledCount})
+        </button>
+      </div>
+
+      {loading ? (
+        <div className='flex justify-center py-8'>
+          <div className='w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin' />
+        </div>
+      ) : requests.length === 0 ? (
+        <div className='text-center py-8 text-gray-500 dark:text-gray-400'>
+          暂无求片
+        </div>
+      ) : (
+        <div className='space-y-3'>
+          {requests.map((req) => (
+            <div
+              key={req.id}
+              className='p-4 bg-gray-50 dark:bg-gray-800 rounded-lg'
+            >
+              <div className='flex gap-4'>
+                {req.poster && (
+                  <img
+                    src={req.poster}
+                    alt={req.title}
+                    className='w-16 h-24 object-cover rounded'
+                  />
+                )}
+                <div className='flex-1'>
+                  <h3 className='font-medium text-gray-900 dark:text-gray-100'>
+                    {req.title} {req.year && `(${req.year})`}
+                  </h3>
+                  <p className='text-sm text-gray-600 dark:text-gray-400 mt-1'>
+                    求片人数: {req.requestCount} 人
+                  </p>
+                  <p className='text-xs text-gray-500 dark:text-gray-500 mt-1'>
+                    {new Date(req.createdAt).toLocaleString('zh-CN')}
+                  </p>
+                  {req.requestedBy && (
+                    <p className='text-xs text-gray-500 dark:text-gray-500 mt-1'>
+                      求片用户: {req.requestedBy.join(', ')}
+                    </p>
+                  )}
+                </div>
+                <div className='flex flex-col gap-2'>
+                  {filter === 'pending' && (
+                    <button
+                      onClick={() => handleFulfill(req.id)}
+                      disabled={isLoading(`fulfill_${req.id}`)}
+                      className={buttonStyles.successSmall}
+                    >
+                      {isLoading(`fulfill_${req.id}`) ? '处理中...' : '标记已上架'}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => handleDelete(req.id)}
+                    disabled={isLoading(`delete_${req.id}`)}
+                    className={buttonStyles.dangerSmall}
+                  >
+                    {isLoading(`delete_${req.id}`) ? '删除中...' : '删除'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      </div>
+
+      <AlertModal
+        isOpen={alertModal.isOpen}
+        onClose={hideAlert}
+        type={alertModal.type}
+        title={alertModal.title}
+        message={alertModal.message}
+        timer={alertModal.timer}
+        showConfirm={alertModal.showConfirm}
+      />
+    </div>
+  );
+};
+
 // AI配置组件
 const AIConfigComponent = ({
   config,
@@ -7683,6 +9730,11 @@ const AIConfigComponent = ({
   const [temperature, setTemperature] = useState(0.7);
   const [maxTokens, setMaxTokens] = useState(1000);
   const [systemPrompt, setSystemPrompt] = useState('');
+  const [enableStreaming, setEnableStreaming] = useState(true);
+
+  // AI默认消息配置
+  const [defaultMessageNoVideo, setDefaultMessageNoVideo] = useState('');
+  const [defaultMessageWithVideo, setDefaultMessageWithVideo] = useState('');
 
   // 从配置加载数据
   useEffect(() => {
@@ -7704,6 +9756,9 @@ const AIConfigComponent = ({
       setTemperature(config.AIConfig.Temperature ?? 0.7);
       setMaxTokens(config.AIConfig.MaxTokens ?? 1000);
       setSystemPrompt(config.AIConfig.SystemPrompt || '');
+      setEnableStreaming(config.AIConfig.EnableStreaming !== false);
+      setDefaultMessageNoVideo(config.AIConfig.DefaultMessageNoVideo || '');
+      setDefaultMessageWithVideo(config.AIConfig.DefaultMessageWithVideo || '');
     }
   }, [config]);
 
@@ -7734,6 +9789,9 @@ const AIConfigComponent = ({
             Temperature: temperature,
             MaxTokens: maxTokens,
             SystemPrompt: systemPrompt,
+            EnableStreaming: enableStreaming,
+            DefaultMessageNoVideo: defaultMessageNoVideo,
+            DefaultMessageWithVideo: defaultMessageWithVideo,
           }),
         });
 
@@ -8084,15 +10142,79 @@ const AIConfigComponent = ({
 
           <div>
             <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
-              自定义系统提示词
+           自定义系统提示词
             </label>
             <textarea
-              value={systemPrompt}
+        value={systemPrompt}
               onChange={(e) => setSystemPrompt(e.target.value)}
               rows={4}
               placeholder='可自定义AI的角色和行为规则...'
               className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100'
             />
+          </div>
+
+          {/* 流式响应开关 */}
+          <div className='flex items-center justify-between py-3 border-t border-gray-200 dark:border-gray-700'>
+            <div className='flex-1'>
+              <label className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+                流式响应
+              </label>
+              <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+                启用后AI消息将实时流式显示，关闭后将等待完整响应后一次性显示
+              </p>
+            </div>
+            <button
+              onClick={() => setEnableStreaming(!enableStreaming)}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+          enableStreaming ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                  enableStreaming ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
+          </div>
+        </div>
+    </details>
+
+      {/* AI默认消息配置 */}
+      <details className='p-4 border border-gray-200 dark:border-gray-700 rounded-lg'>
+        <summary className='text-sm font-semibold text-gray-900 dark:text-gray-100 cursor-pointer'>
+          默认消息配置 (可选)
+        </summary>
+        <div className='mt-4 space-y-4'>
+          <div>
+            <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+              无视频时的默认消息
+            </label>
+            <textarea
+              value={defaultMessageNoVideo}
+              onChange={(e) => setDefaultMessageNoVideo(e.target.value)}
+              rows={3}
+              placeholder='例如：你好！我是MoonTVPlus的AI影视助手。想看什么电影或剧集？需要推荐吗？'
+              className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100'
+            />
+            <p className='mt-2 text-sm text-gray-600 dark:text-gray-400'>
+              当用户在首页或没有视频上下文时打开AI问片，将显示此默认消息
+            </p>
+          </div>
+
+          <div>
+            <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+              有视频时的默认消息
+            </label>
+            <textarea
+              value={defaultMessageWithVideo}
+              onChange={(e) => setDefaultMessageWithVideo(e.target.value)}
+              rows={3}
+              placeholder='例如：你好！我看到你正在浏览《{title}》，有什么想了解的吗？'
+              className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100'
+            />
+            <p className='mt-2 text-sm text-gray-600 dark:text-gray-400'>
+              当用户在视频卡片或播放页打开AI问片时，将显示此默认消息。支持使用 <code className='px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs font-mono'>{'{title}'}</code> 替换符来显示片名
+            </p>
           </div>
         </div>
       </details>
@@ -8745,6 +10867,381 @@ const LiveSourceConfig = ({
   );
 };
 
+// 网络直播配置组件
+const WebLiveConfig = ({
+  config,
+  refreshConfig,
+}: {
+  config: AdminConfig | null;
+  refreshConfig: () => Promise<void>;
+}) => {
+  const { alertModal, showAlert, hideAlert } = useAlertModal();
+  const { isLoading, withLoading } = useLoadingState();
+  const [webLiveSources, setWebLiveSources] = useState<any[]>([]);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [editingSource, setEditingSource] = useState<any | null>(null);
+  const [newSource, setNewSource] = useState({
+    name: '',
+    platform: 'huya',
+    roomId: '',
+  });
+  const [showDisclaimerModal, setShowDisclaimerModal] = useState(false);
+  const [countdown, setCountdown] = useState(10);
+  const [isEnabling, setIsEnabling] = useState(false);
+
+  useEffect(() => {
+    if (config?.WebLiveConfig) {
+      setWebLiveSources(config.WebLiveConfig);
+    }
+  }, [config]);
+
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    if (showDisclaimerModal && countdown > 0) {
+      timer = setTimeout(() => setCountdown(countdown - 1), 1000);
+    }
+    return () => clearTimeout(timer);
+  }, [showDisclaimerModal, countdown]);
+
+  const callApi = async (body: Record<string, any>) => {
+    try {
+      const resp = await fetch('/api/admin/web-live', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error(data.error || `操作失败: ${resp.status}`);
+      }
+      await refreshConfig();
+    } catch (err) {
+      showError(err instanceof Error ? err.message : '操作失败', showAlert);
+      throw err;
+    }
+  };
+
+  const handleAdd = () => {
+    if (!newSource.name || !newSource.platform || !newSource.roomId) return;
+    withLoading('addWebLive', async () => {
+      await callApi({
+        action: 'add',
+        name: newSource.name,
+        platform: newSource.platform,
+        roomId: newSource.roomId,
+      });
+      setNewSource({ name: '', platform: 'huya', roomId: '' });
+      setShowAddForm(false);
+    }).catch(() => {});
+  };
+
+  const handleEdit = () => {
+    if (!editingSource || !editingSource.name || !editingSource.roomId) return;
+    withLoading('editWebLive', async () => {
+      await callApi({
+        action: 'edit',
+        key: editingSource.key,
+        name: editingSource.name,
+        platform: editingSource.platform,
+        roomId: editingSource.roomId,
+      });
+      setEditingSource(null);
+    }).catch(() => {});
+  };
+
+  const handleToggle = (key: string) => {
+    const target = webLiveSources.find((s) => s.key === key);
+    if (!target) return;
+    const action = target.disabled ? 'enable' : 'disable';
+    withLoading(`toggleWebLive_${key}`, () => callApi({ action, key })).catch(() => {});
+  };
+
+  const handleDelete = (key: string) => {
+    withLoading(`deleteWebLive_${key}`, () => callApi({ action: 'delete', key })).catch(() => {});
+  };
+
+  const handleToggleWebLiveEnabled = async () => {
+    const currentEnabled = config?.WebLiveEnabled ?? false;
+
+    if (!currentEnabled) {
+      setShowDisclaimerModal(true);
+      setCountdown(10);
+    } else {
+      await withLoading('toggleWebLiveEnabled', async () => {
+        await callApi({ action: 'toggleEnabled', enabled: false });
+      }).catch(() => {});
+    }
+  };
+
+  const handleConfirmEnable = async () => {
+    setIsEnabling(true);
+    try {
+      await callApi({ action: 'toggleEnabled', enabled: true });
+      setShowDisclaimerModal(false);
+      setCountdown(10);
+    } catch (err) {
+      // Error already handled by callApi
+    } finally {
+      setIsEnabling(false);
+    }
+  };
+
+  if (!config) {
+    return <div className='text-center text-gray-500 dark:text-gray-400'>加载中...</div>;
+  }
+
+  return (
+    <div className='space-y-6'>
+      {/* 功能总开关 */}
+      <div className='p-4 bg-gradient-to-r from-orange-50 to-red-50 dark:from-orange-900/20 dark:to-red-900/20 rounded-lg border-2 border-orange-300 dark:border-orange-700'>
+        <div className='flex items-center justify-between'>
+          <div className='flex-1'>
+            <h4 className='text-sm font-semibold text-gray-900 dark:text-gray-100 mb-1'>
+              网络直播功能总开关
+            </h4>
+            <p className='text-xs text-gray-600 dark:text-gray-400'>
+              关闭后，侧边栏和底部导航栏的网络直播入口将被隐藏，用户无法访问网络直播页面
+            </p>
+          </div>
+          <button
+            onClick={handleToggleWebLiveEnabled}
+            disabled={isLoading('toggleWebLiveEnabled')}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 ${
+              config.WebLiveEnabled ? buttonStyles.toggleOn : buttonStyles.toggleOff
+            } ${isLoading('toggleWebLiveEnabled') ? 'opacity-50 cursor-not-allowed' : ''}`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full transition-transform ${
+                buttonStyles.toggleThumb
+              } ${config.WebLiveEnabled ? buttonStyles.toggleThumbOn : buttonStyles.toggleThumbOff}`}
+            />
+          </button>
+        </div>
+      </div>
+
+      {/* 免责声明弹窗 */}
+      {showDisclaimerModal && createPortal(
+        <div className='fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4'>
+          <div className='bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full border border-red-200 dark:border-red-800'>
+            <div className='p-6'>
+              <div className='flex justify-center mb-4'>
+                <AlertTriangle className='w-12 h-12 text-red-500' />
+              </div>
+
+              <h3 className='text-xl font-bold text-gray-900 dark:text-gray-100 mb-4 text-center'>
+                免责声明
+              </h3>
+
+              <div className='bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 mb-6'>
+                <p className='text-sm text-gray-700 dark:text-gray-300 leading-relaxed'>
+                  本功能仅供个人学习和技术研究使用，请勿将其部署在公网环境中，更不得用于任何违法违规行为。
+                  使用本功能所产生的一切法律责任由使用者自行承担，与开发者无关。
+                  启用此功能即表示您已充分理解并同意承担相应风险。
+                </p>
+              </div>
+
+              <div className='flex gap-3 justify-center'>
+                <button
+                  onClick={() => {
+                    setShowDisclaimerModal(false);
+                    setCountdown(10);
+                  }}
+                  className={buttonStyles.secondary}
+                  disabled={isEnabling}
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleConfirmEnable}
+                  disabled={countdown > 0 || isEnabling}
+                  className={countdown > 0 || isEnabling ? buttonStyles.disabled : buttonStyles.danger}
+                >
+                  {isEnabling ? '启用中...' : countdown > 0 ? `确认 (${countdown}s)` : '确认启用'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      <div className='flex items-center justify-between'>
+        <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>网络直播列表</h4>
+        <button
+          onClick={() => setShowAddForm(!showAddForm)}
+          className={showAddForm ? buttonStyles.secondary : buttonStyles.success}
+        >
+          {showAddForm ? '取消' : '添加网络直播'}
+        </button>
+      </div>
+
+      {showAddForm && (
+        <div className='p-4 bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 space-y-4'>
+          <div className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
+            <input
+              type='text'
+              placeholder='名称'
+              value={newSource.name}
+              onChange={(e) => setNewSource((prev) => ({ ...prev, name: e.target.value }))}
+              className='px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+            />
+            <select
+              value={newSource.platform}
+              onChange={(e) => setNewSource((prev) => ({ ...prev, platform: e.target.value }))}
+              className='px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+            >
+              <option value='huya'>虎牙</option>
+              <option value='bilibili'>哔哩哔哩</option>
+              <option value='douyin'>抖音</option>
+            </select>
+            <input
+              type='text'
+              placeholder='房间ID'
+              value={newSource.roomId}
+              onChange={(e) => setNewSource((prev) => ({ ...prev, roomId: e.target.value }))}
+              className='px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+            />
+          </div>
+          <div className='flex justify-end'>
+            <button
+              onClick={handleAdd}
+              disabled={!newSource.name || !newSource.platform || !newSource.roomId || isLoading('addWebLive')}
+              className={`w-full sm:w-auto px-4 py-2 ${
+                !newSource.name || !newSource.platform || !newSource.roomId || isLoading('addWebLive')
+                  ? buttonStyles.disabled
+                  : buttonStyles.success
+              }`}
+            >
+              {isLoading('addWebLive') ? '添加中...' : '添加'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {editingSource && (
+        <div className='p-4 bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 space-y-4'>
+          <div className='flex items-center justify-between'>
+            <h5 className='text-sm font-medium text-gray-700 dark:text-gray-300'>编辑: {editingSource.name}</h5>
+            <button onClick={() => setEditingSource(null)} className='text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'>✕</button>
+          </div>
+          <div className='grid grid-cols-1 sm:grid-cols-2 gap-4'>
+            <div>
+              <label className='block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1'>名称</label>
+              <input
+                type='text'
+                value={editingSource.name}
+                onChange={(e) => setEditingSource((prev: any) => prev ? { ...prev, name: e.target.value } : null)}
+                className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+              />
+            </div>
+            <div>
+              <label className='block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1'>直播类型</label>
+              <select
+                value={editingSource.platform}
+                onChange={(e) => setEditingSource((prev: any) => prev ? { ...prev, platform: e.target.value } : null)}
+                className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+              >
+                <option value='huya'>虎牙</option>
+                <option value='bilibili'>哔哩哔哩</option>
+                <option value='douyin'>抖音</option>
+              </select>
+            </div>
+            <div>
+              <label className='block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1'>房间ID</label>
+              <input
+                type='text'
+                value={editingSource.roomId}
+                onChange={(e) => setEditingSource((prev: any) => prev ? { ...prev, roomId: e.target.value } : null)}
+                className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+              />
+            </div>
+          </div>
+          <div className='flex justify-end space-x-2'>
+            <button onClick={() => setEditingSource(null)} className={buttonStyles.secondary}>取消</button>
+            <button
+              onClick={handleEdit}
+              disabled={!editingSource.name || !editingSource.roomId || isLoading('editWebLive')}
+              className={`${!editingSource.name || !editingSource.roomId || isLoading('editWebLive') ? buttonStyles.disabled : buttonStyles.success}`}
+            >
+              {isLoading('editWebLive') ? '保存中...' : '保存'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className='border border-gray-200 dark:border-gray-700 rounded-lg overflow-auto'>
+        <table className='min-w-full divide-y divide-gray-200 dark:divide-gray-700'>
+          <thead className='bg-gray-50 dark:bg-gray-900'>
+            <tr>
+              <th className='px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase'>名称</th>
+              <th className='hidden sm:table-cell px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase'>直播类型</th>
+              <th className='hidden sm:table-cell px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase'>房间ID</th>
+              <th className='px-3 sm:px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase'>状态</th>
+              <th className='px-3 sm:px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase'>操作</th>
+            </tr>
+          </thead>
+          <tbody className='divide-y divide-gray-200 dark:divide-gray-700'>
+            {webLiveSources.map((source) => (
+              <tr key={source.key} className='hover:bg-gray-50 dark:hover:bg-gray-800'>
+                <td className='px-3 sm:px-6 py-4 text-sm text-gray-900 dark:text-gray-100'>
+                  <div>{source.name}</div>
+                  <div className='sm:hidden text-xs text-gray-500 dark:text-gray-400 mt-1'>{source.platform === 'huya' ? '虎牙' : source.platform === 'bilibili' ? '哔哩哔哩' : source.platform === 'douyin' ? '抖音' : source.platform} · {source.roomId}</div>
+                </td>
+                <td className='hidden sm:table-cell px-6 py-4 text-sm text-gray-900 dark:text-gray-100'>{source.platform === 'huya' ? '虎牙' : source.platform === 'bilibili' ? '哔哩哔哩' : source.platform === 'douyin' ? '抖音' : source.platform}</td>
+                <td className='hidden sm:table-cell px-6 py-4 text-sm text-gray-900 dark:text-gray-100'>{source.roomId}</td>
+                <td className='px-3 sm:px-6 py-4 whitespace-nowrap'>
+                  <span className={`px-2 py-1 text-xs rounded-full whitespace-nowrap ${!source.disabled ? 'bg-green-100 dark:bg-green-900/20 text-green-800 dark:text-green-300' : 'bg-red-100 dark:bg-red-900/20 text-red-800 dark:text-red-300'}`}>
+                    {!source.disabled ? '启用中' : '已禁用'}
+                  </span>
+                </td>
+                <td className='px-3 sm:px-6 py-4 text-right text-sm whitespace-nowrap'>
+                  <div className='flex flex-col sm:flex-row gap-1 sm:gap-2 items-end sm:items-center justify-end'>
+                    <button
+                      onClick={() => handleToggle(source.key)}
+                      disabled={isLoading(`toggleWebLive_${source.key}`)}
+                      className={`inline-flex items-center px-3 py-1.5 rounded-full text-xs font-medium ${!source.disabled ? buttonStyles.roundedDanger : buttonStyles.roundedSuccess} ${isLoading(`toggleWebLive_${source.key}`) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      {!source.disabled ? '禁用' : '启用'}
+                    </button>
+                    {source.from !== 'config' && (
+                      <>
+                        <button
+                          onClick={() => setEditingSource(source)}
+                          disabled={isLoading(`editWebLive_${source.key}`)}
+                          className={`${buttonStyles.roundedPrimary} ${isLoading(`editWebLive_${source.key}`) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        >
+                          编辑
+                        </button>
+                        <button
+                          onClick={() => handleDelete(source.key)}
+                          disabled={isLoading(`deleteWebLive_${source.key}`)}
+                          className={`${buttonStyles.roundedSecondary} ${isLoading(`deleteWebLive_${source.key}`) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        >
+                          删除
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <AlertModal
+        isOpen={alertModal.isOpen}
+        onClose={hideAlert}
+        type={alertModal.type}
+        title={alertModal.title}
+        message={alertModal.message}
+        timer={alertModal.timer}
+        showConfirm={alertModal.showConfirm}
+      />
+    </div>
+  );
+};
+
 function AdminPageClient() {
   const { alertModal, showAlert, hideAlert } = useAlertModal();
   const { isLoading, withLoading } = useLoadingState();
@@ -8756,9 +11253,13 @@ function AdminPageClient() {
   const [expandedTabs, setExpandedTabs] = useState<{ [key: string]: boolean }>({
     userConfig: false,
     videoSource: false,
+    mediaLibrary: false,
     openListConfig: false,
+    embyConfig: false,
+    xiaoyaConfig: false,
     aiConfig: false,
     liveSource: false,
+    webLive: false,
     siteConfig: false,
     registrationConfig: false,
     categoryConfig: false,
@@ -8766,6 +11267,7 @@ function AdminPageClient() {
     dataMigration: false,
     customAdFilter: false,
     themeConfig: false,
+    emailConfig: false,
   });
 
   // 获取管理员配置
@@ -8815,7 +11317,7 @@ function AdminPageClient() {
   const userLimit = 10;
 
   // 获取新版本用户列表
-  const fetchUsersV2 = useCallback(async (page: number = 1) => {
+  const fetchUsersV2 = useCallback(async (page = 1) => {
     try {
       setUserListLoading(true);
       const response = await fetch(`/api/admin/users?page=${page}&limit=${userLimit}`);
@@ -8882,6 +11384,23 @@ function AdminPageClient() {
     });
   };
 
+  // 新增: 重载配置处理函数
+  const handleReloadConfig = async () => {
+    await withLoading('reloadConfig', async () => {
+      try {
+        const response = await fetch(`/api/admin/reload`);
+        if (!response.ok) {
+          throw new Error(`重载失败: ${response.status}`);
+        }
+        showSuccess('重载成功，配置缓存已清除！', showAlert);
+        await fetchConfig();
+      } catch (err) {
+        showError(err instanceof Error ? err.message : '重载失败', showAlert);
+        throw err;
+      }
+    });
+  };
+
   if (loading) {
     return (
       <PageLayout activePath='/admin'>
@@ -8919,12 +11438,20 @@ function AdminPageClient() {
               管理员设置
             </h1>
             {config && role === 'owner' && (
-              <button
-                onClick={handleResetConfig}
-                className={`px-3 py-1 text-xs rounded-md transition-colors ${buttonStyles.dangerSmall}`}
-              >
-                重置配置
-              </button>
+              <>
+                <button
+                  onClick={handleResetConfig}
+                  className={`px-3 py-1 text-xs rounded-md transition-colors ${buttonStyles.dangerSmall}`}
+                >
+                  重置配置
+                </button>
+                <button
+                  onClick={handleReloadConfig}
+                  className={`px-3 py-1 text-xs rounded-md transition-colors ${buttonStyles.primarySmall}`}
+                >
+                  重载配置
+                </button>
+              </>
             )}
           </div>
 
@@ -8996,9 +11523,9 @@ function AdminPageClient() {
             <RegistrationConfigComponent config={config} refreshConfig={fetchConfig} />
           </CollapsibleTab>
 
-          {/* 主题配置标签 */}
+          {/* 个性化配置标签 */}
           <CollapsibleTab
-            title='主题配置'
+            title='个性化配置'
             icon={
               <Palette
                 size={20}
@@ -9046,9 +11573,9 @@ function AdminPageClient() {
               <VideoSourceConfig config={config} refreshConfig={fetchConfig} />
             </CollapsibleTab>
 
-            {/* 直播源配置标签 */}
+            {/* 电视直播源配置标签 */}
             <CollapsibleTab
-              title='直播源配置'
+              title='电视直播源配置'
               icon={
                 <Tv size={20} className='text-gray-600 dark:text-gray-400' />
               }
@@ -9058,16 +11585,77 @@ function AdminPageClient() {
               <LiveSourceConfig config={config} refreshConfig={fetchConfig} />
             </CollapsibleTab>
 
-            {/* 私人影库配置标签 */}
+            {/* 网络直播配置标签 */}
+            <CollapsibleTab
+              title='网络直播配置'
+              icon={
+                <Globe size={20} className='text-gray-600 dark:text-gray-400' />
+              }
+              isExpanded={expandedTabs.webLive}
+              onToggle={() => toggleTab('webLive')}
+            >
+              <WebLiveConfig config={config} refreshConfig={fetchConfig} />
+            </CollapsibleTab>
+
+            {/* 私人影库大类 */}
             <CollapsibleTab
               title='私人影库'
               icon={
-                <FolderOpen size={20} className='text-gray-600 dark:text-gray-400' />
+                <Database size={20} className='text-yellow-700 dark:text-yellow-400' />
               }
-              isExpanded={expandedTabs.openListConfig}
-              onToggle={() => toggleTab('openListConfig')}
+              isExpanded={expandedTabs.mediaLibrary}
+              onToggle={() => toggleTab('mediaLibrary')}
+              isParent={true}
             >
-              <OpenListConfigComponent config={config} refreshConfig={fetchConfig} />
+              <div className='space-y-4'>
+                {/* Openlist配置子标签 */}
+                <CollapsibleTab
+                  title='Openlist配置'
+                  icon={
+                    <FolderOpen size={20} className='text-gray-600 dark:text-gray-400' />
+                  }
+                  isExpanded={expandedTabs.openListConfig}
+                  onToggle={() => toggleTab('openListConfig')}
+                >
+                  <OpenListConfigComponent config={config} refreshConfig={fetchConfig} />
+                </CollapsibleTab>
+
+                {/* Emby 媒体库子标签 */}
+                <CollapsibleTab
+                  title='Emby 媒体库'
+                  icon={
+                    <FolderOpen size={20} className='text-gray-600 dark:text-gray-400' />
+                  }
+                  isExpanded={expandedTabs.embyConfig}
+                  onToggle={() => toggleTab('embyConfig')}
+                >
+                  <EmbyConfigComponent config={config} refreshConfig={fetchConfig} />
+                </CollapsibleTab>
+
+                {/* 小雅配置子标签 */}
+                <CollapsibleTab
+                  title='小雅配置'
+                  icon={
+                    <FolderOpen size={20} className='text-gray-600 dark:text-gray-400' />
+                  }
+                  isExpanded={expandedTabs.xiaoyaConfig}
+                  onToggle={() => toggleTab('xiaoyaConfig')}
+                >
+                  <XiaoyaConfigComponent config={config} refreshConfig={fetchConfig} />
+                </CollapsibleTab>
+
+                {/* 求片管理子标签 */}
+                <CollapsibleTab
+                  title='求片管理'
+                  icon={
+                    <Video size={20} className='text-gray-600 dark:text-gray-400' />
+                  }
+                  isExpanded={expandedTabs.movieRequests}
+                  onToggle={() => toggleTab('movieRequests')}
+                >
+                  <MovieRequestsComponent config={config} refreshConfig={fetchConfig} />
+                </CollapsibleTab>
+              </div>
             </CollapsibleTab>
 
             {/* AI配置标签 */}
@@ -9080,6 +11668,18 @@ function AdminPageClient() {
               onToggle={() => toggleTab('aiConfig')}
             >
               <AIConfigComponent config={config} refreshConfig={fetchConfig} />
+            </CollapsibleTab>
+
+            {/* 邮件配置标签 */}
+            <CollapsibleTab
+              title='邮件配置'
+              icon={
+                <Mail size={20} className='text-gray-600 dark:text-gray-400' />
+              }
+              isExpanded={expandedTabs.emailConfig}
+              onToggle={() => toggleTab('emailConfig')}
+            >
+              <EmailConfigComponent config={config} refreshConfig={fetchConfig} />
             </CollapsibleTab>
 
             {/* 分类配置标签 */}

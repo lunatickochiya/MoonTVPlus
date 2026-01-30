@@ -1,6 +1,14 @@
 // 弹幕 API 服务封装（通过本地代理转发）
+import {
+  clearAllDanmakuCache,
+  clearDanmakuCache,
+  clearExpiredDanmakuCache,
+  generateCacheKey,
+  getDanmakuCacheStats,
+  getDanmakuFromCache,
+  saveDanmakuToCache,
+} from './cache';
 import type {
-  DanmakuAnime,
   DanmakuComment,
   DanmakuCommentsResponse,
   DanmakuEpisodesResponse,
@@ -9,16 +17,6 @@ import type {
   DanmakuSearchResponse,
   DanmakuSettings,
 } from './types';
-
-import {
-  getDanmakuFromCache,
-  saveDanmakuToCache,
-  clearExpiredDanmakuCache,
-  clearAllDanmakuCache,
-  clearDanmakuCache,
-  getDanmakuCacheStats,
-  generateCacheKey,
-} from './cache';
 
 // 初始化弹幕模块（清理过期缓存）
 let _cacheCleanupInitialized = false;
@@ -46,8 +44,8 @@ export {
   clearAllDanmakuCache,
   clearDanmakuCache,
   clearExpiredDanmakuCache,
-  getDanmakuCacheStats,
   generateCacheKey,
+  getDanmakuCacheStats,
   getDanmakuFromCache,
 };
 
@@ -143,15 +141,22 @@ export async function getEpisodes(
 export async function getDanmakuById(
   episodeId: number,
   title?: string,
-  episodeIndex?: number
+  episodeIndex?: number,
+  metadata?: {
+    animeId?: number;
+    animeTitle?: string;
+    episodeTitle?: string;
+    searchKeyword?: string;
+    danmakuCount?: number;
+  }
 ): Promise<DanmakuComment[]> {
   try {
     // 1. 如果提供了 title 和 episodeIndex，先尝试从缓存读取
     if (title && episodeIndex !== undefined) {
-      const cachedComments = await getDanmakuFromCache(title, episodeIndex);
-      if (cachedComments) {
-        console.log(`[弹幕缓存] 使用缓存: title=${title}, episodeIndex=${episodeIndex}, 数量=${cachedComments.length}`);
-        return cachedComments;
+      const cachedData = await getDanmakuFromCache(title, episodeIndex);
+      if (cachedData) {
+        console.log(`[弹幕缓存] 使用缓存: title=${title}, episodeIndex=${episodeIndex}, 数量=${cachedData.comments.length}`);
+        return cachedData.comments;
       }
       console.log(`[弹幕缓存] 缓存未命中，从 API 获取: title=${title}, episodeIndex=${episodeIndex}`);
     } else {
@@ -173,7 +178,14 @@ export async function getDanmakuById(
     if (comments.length > 0 && title && title.trim() !== '' && episodeIndex !== undefined && episodeIndex >= 0) {
       try {
         console.log(`[弹幕缓存] 尝试保存缓存: title="${title}", episodeIndex=${episodeIndex}, 数量=${comments.length}`);
-        await saveDanmakuToCache(title, episodeIndex, comments);
+        await saveDanmakuToCache(title, episodeIndex, comments, {
+          animeId: metadata?.animeId,
+          episodeId: episodeId,
+          animeTitle: metadata?.animeTitle,
+          episodeTitle: metadata?.episodeTitle,
+          searchKeyword: metadata?.searchKeyword,
+          danmakuCount: metadata?.danmakuCount ?? comments.length,
+        });
         console.log(`[弹幕缓存] 已缓存: title=${title}, episodeIndex=${episodeIndex}, 数量=${comments.length}`);
       } catch (cacheError) {
         console.error('[弹幕缓存] 保存缓存失败:', cacheError);
@@ -263,10 +275,13 @@ export function loadDanmakuSettings(): DanmakuSettings {
 
   try {
     const saved = localStorage.getItem('danmaku_settings');
+    let settings = DEFAULT_DANMAKU_SETTINGS;
+
     if (saved) {
-      const settings = JSON.parse(saved) as DanmakuSettings;
-      return { ...DEFAULT_DANMAKU_SETTINGS, ...settings };
+      settings = { ...DEFAULT_DANMAKU_SETTINGS, ...JSON.parse(saved) };
     }
+
+    return settings;
   } catch (error) {
     console.error('读取弹幕设置失败:', error);
   }
@@ -281,6 +296,31 @@ export function saveDanmakuSettings(settings: DanmakuSettings): void {
     localStorage.setItem('danmaku_settings', JSON.stringify(settings));
   } catch (error) {
     console.error('保存弹幕设置失败:', error);
+  }
+}
+
+// 保存弹幕显示状态到 localStorage（独立的 key）
+export function saveDanmakuDisplayState(enabled: boolean): void {
+  if (typeof window === 'undefined') return;
+
+  try {
+    localStorage.setItem('danmaku_display_enabled', String(enabled));
+  } catch (error) {
+    console.error('保存弹幕显示状态失败:', error);
+  }
+}
+
+// 读取弹幕显示状态
+export function loadDanmakuDisplayState(): boolean | null {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    const saved = localStorage.getItem('danmaku_display_enabled');
+    if (saved === null) return null;
+    return saved === 'true';
+  } catch (error) {
+    console.error('读取弹幕显示状态失败:', error);
+    return null;
   }
 }
 

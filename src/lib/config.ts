@@ -194,13 +194,37 @@ async function getInitConfig(configFile: string, subConfig: {
     LastCheck: "",
   }): Promise<AdminConfig> {
   let cfgFile: ConfigFileStruct;
+
+  // 优先从环境变量读取订阅 URL
+  const envSubUrl = process.env.CONFIG_SUBSCRIPTION_URL || "";
+
+  if (envSubUrl) {
+    try {
+      const response = await fetch(envSubUrl);
+      if (response.ok) {
+        const configContent = await response.text();
+        const bs58 = (await import('bs58')).default;
+        const decodedBytes = bs58.decode(configContent);
+        const decodedContent = new TextDecoder().decode(decodedBytes);
+        configFile = decodedContent;
+        console.log('已从订阅 URL 获取配置');
+      }
+    } catch (e) {
+      console.error('从订阅 URL 获取配置失败:', e);
+    }
+  }
+
+  // 优先从环境变量读取配置
+  const envConfig = process.env.INIT_CONFIG || "";
+  const configSource = envConfig || configFile;
+
   try {
-    cfgFile = JSON.parse(configFile) as ConfigFileStruct;
+    cfgFile = JSON.parse(configSource) as ConfigFileStruct;
   } catch (e) {
     cfgFile = {} as ConfigFileStruct;
   }
   const adminConfig: AdminConfig = {
-    ConfigFile: configFile,
+    ConfigFile: configSource,
     ConfigSubscribtion: subConfig,
     SiteConfig: {
       SiteName: process.env.NEXT_PUBLIC_SITE_NAME || 'MoonTVPlus',
@@ -224,8 +248,14 @@ async function getInitConfig(configFile: string, subConfig: {
       DanmakuApiBase: process.env.DANMAKU_API_BASE || 'http://localhost:9321',
       DanmakuApiToken: process.env.DANMAKU_API_TOKEN || '87654321',
       // TMDB配置
-      TMDBApiKey: '',
-      TMDBProxy: '',
+      TMDBApiKey: process.env.TMDB_API_KEY || '',
+      TMDBProxy: process.env.TMDB_PROXY || '',
+      TMDBReverseProxy: process.env.TMDB_REVERSE_PROXY || '',
+      // Pansou配置
+      PansouApiUrl: '',
+      PansouUsername: '',
+      PansouPassword: '',
+      PansouKeywordBlocklist: '',
       // 评论功能开关
       EnableComments: false,
     },
@@ -237,24 +267,9 @@ async function getInitConfig(configFile: string, subConfig: {
     LiveConfig: [],
   };
 
-  // 补充用户信息
-  let userNames: string[] = [];
-  try {
-    userNames = await db.getAllUsers();
-  } catch (e) {
-    console.error('获取用户列表失败:', e);
-  }
-  const allUsers = userNames.filter((u) => u !== process.env.USERNAME).map((u) => ({
-    username: u,
-    role: 'user',
-    banned: false,
-  }));
-  allUsers.unshift({
-    username: process.env.USERNAME!,
-    role: 'owner',
-    banned: false,
-  });
-  adminConfig.UserConfig.Users = allUsers as any;
+  // 用户信息已迁移到新版数据库，不再填充 UserConfig.Users
+  // 保持为空数组，避免与新版用户系统冲突
+  adminConfig.UserConfig.Users = [];
 
   // 从配置文件中补充源信息
   Object.entries(cfgFile.api_site || []).forEach(([key, site]) => {
@@ -312,6 +327,17 @@ export async function getConfig(): Promise<AdminConfig> {
 
   // 创建初始化 Promise
   configInitPromise = (async () => {
+    const storageType = process.env.NEXT_PUBLIC_STORAGE_TYPE || 'localstorage';
+
+    // localStorage 模式下直接从环境变量初始化
+    if (storageType === 'localstorage') {
+      console.log('localStorage 模式：从环境变量初始化配置');
+      const adminConfig = await getInitConfig("");
+      cachedConfig = configSelfCheck(adminConfig);
+      configInitPromise = null;
+      return cachedConfig;
+    }
+
     // 读 db
     let adminConfig: AdminConfig | null = null;
     let dbReadFailed = false;
@@ -335,8 +361,24 @@ export async function getConfig(): Promise<AdminConfig> {
         await db.saveAdminConfig(adminConfig);
       }
     }
+
+    // 检查是否有旧格式Emby配置需要迁移
+    const needsEmbyMigration = adminConfig.EmbyConfig &&
+                                adminConfig.EmbyConfig.ServerURL &&
+                                !adminConfig.EmbyConfig.Sources;
+
     adminConfig = configSelfCheck(adminConfig);
     cachedConfig = adminConfig;
+
+    // 如果进行了Emby配置迁移，保存到数据库
+    if (!dbReadFailed && needsEmbyMigration) {
+      try {
+        await db.saveAdminConfig(adminConfig);
+        console.log('[Config] Emby配置迁移已保存到数据库');
+      } catch (error) {
+        console.error('[Config] 保存迁移后的配置失败:', error);
+      }
+    }
 
     // 自动迁移用户（如果配置中有用户且V2存储支持）
     // 过滤掉站长后检查是否有需要迁移的用户
@@ -386,6 +428,10 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
       FluidSearch: true,
       DanmakuApiBase: 'http://localhost:9321',
       DanmakuApiToken: '87654321',
+      PansouApiUrl: '',
+      PansouUsername: '',
+      PansouPassword: '',
+      PansouKeywordBlocklist: '',
       EnableComments: false,
     };
   }
@@ -399,6 +445,9 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   // 确保评论开关存在
   if (adminConfig.SiteConfig.EnableComments === undefined) {
     adminConfig.SiteConfig.EnableComments = false;
+  }
+  if (adminConfig.SiteConfig.PansouKeywordBlocklist === undefined) {
+    adminConfig.SiteConfig.PansouKeywordBlocklist = '';
   }
   if (!adminConfig.UserConfig) {
     adminConfig.UserConfig = { Users: [] };
@@ -416,35 +465,14 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
     adminConfig.LiveConfig = [];
   }
 
-  // 站长变更自检
+  // 用户信息已迁移到新版数据库
+  // 这里只保留站长用户用于兼容性，其他用户从数据库读取
   const ownerUser = process.env.USERNAME;
-
-  // 去重
-  const seenUsernames = new Set<string>();
-  adminConfig.UserConfig.Users = adminConfig.UserConfig.Users.filter((user) => {
-    if (seenUsernames.has(user.username)) {
-      return false;
-    }
-    seenUsernames.add(user.username);
-    return true;
-  });
-  // 过滤站长
-  const originOwnerCfg = adminConfig.UserConfig.Users.find((u) => u.username === ownerUser);
-  adminConfig.UserConfig.Users = adminConfig.UserConfig.Users.filter((user) => user.username !== ownerUser);
-  // 其他用户不得拥有 owner 权限
-  adminConfig.UserConfig.Users.forEach((user) => {
-    if (user.role === 'owner') {
-      user.role = 'user';
-    }
-  });
-  // 重新添加回站长
-  adminConfig.UserConfig.Users.unshift({
+  adminConfig.UserConfig.Users = [{
     username: ownerUser!,
     role: 'owner',
     banned: false,
-    enabledApis: originOwnerCfg?.enabledApis || undefined,
-    tags: originOwnerCfg?.tags || undefined,
-  });
+  }];
 
   // 采集源去重
   const seenSourceKeys = new Set<string>();
@@ -476,6 +504,44 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
     return true;
   });
 
+  // Emby配置迁移：将旧格式迁移到新格式
+  if (adminConfig.EmbyConfig) {
+    // 如果是旧格式（有ServerURL但没有Sources）
+    if (adminConfig.EmbyConfig.ServerURL && !adminConfig.EmbyConfig.Sources) {
+      console.log('[Config] 检测到旧格式Emby配置，自动迁移到新格式');
+      const oldConfig = adminConfig.EmbyConfig;
+      adminConfig.EmbyConfig = {
+        Sources: [{
+          key: 'default',
+          name: 'Emby',
+          enabled: oldConfig.Enabled ?? false,
+          ServerURL: oldConfig.ServerURL || '',
+          ApiKey: oldConfig.ApiKey,
+          Username: oldConfig.Username,
+          Password: oldConfig.Password,
+          UserId: oldConfig.UserId,
+          AuthToken: oldConfig.AuthToken,
+          Libraries: oldConfig.Libraries,
+          LastSyncTime: oldConfig.LastSyncTime,
+          ItemCount: oldConfig.ItemCount,
+          isDefault: true,
+        }],
+      };
+    }
+
+    // Emby源去重
+    if (adminConfig.EmbyConfig?.Sources) {
+      const seenEmbyKeys = new Set<string>();
+      adminConfig.EmbyConfig.Sources = adminConfig.EmbyConfig.Sources.filter((source) => {
+        if (seenEmbyKeys.has(source.key)) {
+          return false;
+        }
+        seenEmbyKeys.add(source.key);
+        return true;
+      });
+    }
+  }
+
   return adminConfig;
 }
 
@@ -506,6 +572,12 @@ export async function getAvailableApiSites(user?: string): Promise<ApiSite[]> {
   const allApiSites = config.SourceConfig.filter((s) => !s.disabled);
 
   if (!user) {
+    return allApiSites;
+  }
+
+  // localStorage 模式下直接返回所有可用源
+  const storageType = process.env.NEXT_PUBLIC_STORAGE_TYPE || 'localstorage';
+  if (storageType === 'localstorage') {
     return allApiSites;
   }
 
@@ -556,4 +628,9 @@ export async function getAvailableApiSites(user?: string): Promise<ApiSite[]> {
 
 export async function setCachedConfig(config: AdminConfig) {
   cachedConfig = config;
+}
+
+export async function clearConfigCache() {
+  cachedConfig = null as any;
+  configInitPromise = null;
 }

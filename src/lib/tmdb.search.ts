@@ -2,7 +2,48 @@
 
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import nodeFetch from 'node-fetch';
+
 import { getNextApiKey } from './tmdb.client';
+
+// TMDB API 默认 Base URL（不包含 /3/，由程序拼接）
+const DEFAULT_TMDB_BASE_URL = 'https://api.themoviedb.org';
+
+/**
+ * 检测是否在 Cloudflare 环境中运行
+ */
+function isCloudflareEnvironment(): boolean {
+  return process.env.CF_PAGES === '1' || process.env.BUILD_TARGET === 'cloudflare';
+}
+
+/**
+ * 统一的 fetch 函数，根据环境选择使用 node-fetch 或原生 fetch
+ */
+async function universalFetch(url: string, proxy?: string): Promise<Response> {
+  const isCloudflare = isCloudflareEnvironment();
+
+  if (isCloudflare) {
+    // Cloudflare 环境：使用原生 fetch，忽略 proxy 参数
+    const response = await fetch(url, {
+      signal: AbortSignal.timeout(15000),
+    });
+    return response as unknown as Response;
+  } else {
+    // Node.js 环境：使用 node-fetch，支持 proxy
+    const fetchOptions: any = proxy
+      ? {
+          agent: new HttpsProxyAgent(proxy, {
+            timeout: 30000,
+            keepAlive: false,
+          }),
+          signal: AbortSignal.timeout(30000),
+        }
+      : {
+          signal: AbortSignal.timeout(15000),
+        };
+
+    return nodeFetch(url, fetchOptions) as unknown as Response;
+  }
+}
 
 export interface TMDBSearchResult {
   id: number;
@@ -30,7 +71,8 @@ export async function searchTMDB(
   apiKey: string,
   query: string,
   proxy?: string,
-  year?: number
+  year?: number,
+  reverseProxyBaseUrl?: string
 ): Promise<{ code: number; result: TMDBSearchResult | null }> {
   try {
     const actualKey = getNextApiKey(apiKey);
@@ -38,28 +80,17 @@ export async function searchTMDB(
       return { code: 400, result: null };
     }
 
+    const baseUrl = reverseProxyBaseUrl || DEFAULT_TMDB_BASE_URL;
     // 使用 multi search 同时搜索电影和电视剧
-    let url = `https://api.themoviedb.org/3/search/multi?api_key=${actualKey}&language=zh-CN&query=${encodeURIComponent(query)}&page=1`;
+    let url = `${baseUrl}/3/search/multi?api_key=${actualKey}&language=zh-CN&query=${encodeURIComponent(query)}&page=1`;
 
     // 如果提供了年份，添加到搜索参数中
     if (year) {
       url += `&year=${year}`;
     }
 
-    const fetchOptions: any = proxy
-      ? {
-          agent: new HttpsProxyAgent(proxy, {
-            timeout: 30000,
-            keepAlive: false,
-          }),
-          signal: AbortSignal.timeout(30000),
-        }
-      : {
-          signal: AbortSignal.timeout(15000),
-        };
-
-    // 使用 node-fetch 而不是原生 fetch，因为原生 fetch 不支持 agent 选项
-    const response = await nodeFetch(url, fetchOptions);
+    // 使用统一的 fetch 函数
+    const response = await universalFetch(url, proxy);
 
     if (!response.ok) {
       console.error('TMDB 搜索失败:', response.status, response.statusText);
@@ -120,7 +151,8 @@ interface TMDBTVDetails {
 export async function getTVSeasons(
   apiKey: string,
   tvId: number,
-  proxy?: string
+  proxy?: string,
+  reverseProxyBaseUrl?: string
 ): Promise<{ code: number; seasons: TMDBSeasonInfo[] | null }> {
   try {
     const actualKey = getNextApiKey(apiKey);
@@ -128,21 +160,10 @@ export async function getTVSeasons(
       return { code: 400, seasons: null };
     }
 
-    const url = `https://api.themoviedb.org/3/tv/${tvId}?api_key=${actualKey}&language=zh-CN`;
+    const baseUrl = reverseProxyBaseUrl || DEFAULT_TMDB_BASE_URL;
+    const url = `${baseUrl}/3/tv/${tvId}?api_key=${actualKey}&language=zh-CN`;
 
-    const fetchOptions: any = proxy
-      ? {
-          agent: new HttpsProxyAgent(proxy, {
-            timeout: 30000,
-            keepAlive: false,
-          }),
-          signal: AbortSignal.timeout(30000),
-        }
-      : {
-          signal: AbortSignal.timeout(15000),
-        };
-
-    const response = await nodeFetch(url, fetchOptions);
+    const response = await universalFetch(url, proxy);
 
     if (!response.ok) {
       console.error('TMDB 获取电视剧详情失败:', response.status, response.statusText);
@@ -171,7 +192,8 @@ export async function getTVSeasonDetails(
   apiKey: string,
   tvId: number,
   seasonNumber: number,
-  proxy?: string
+  proxy?: string,
+  reverseProxyBaseUrl?: string
 ): Promise<{ code: number; season: TMDBSeasonInfo | null }> {
   try {
     const actualKey = getNextApiKey(apiKey);
@@ -179,21 +201,10 @@ export async function getTVSeasonDetails(
       return { code: 400, season: null };
     }
 
-    const url = `https://api.themoviedb.org/3/tv/${tvId}/season/${seasonNumber}?api_key=${actualKey}&language=zh-CN`;
+    const baseUrl = reverseProxyBaseUrl || DEFAULT_TMDB_BASE_URL;
+    const url = `${baseUrl}/3/tv/${tvId}/season/${seasonNumber}?api_key=${actualKey}&language=zh-CN`;
 
-    const fetchOptions: any = proxy
-      ? {
-          agent: new HttpsProxyAgent(proxy, {
-            timeout: 30000,
-            keepAlive: false,
-          }),
-          signal: AbortSignal.timeout(30000),
-        }
-      : {
-          signal: AbortSignal.timeout(15000),
-        };
-
-    const response = await nodeFetch(url, fetchOptions);
+    const response = await universalFetch(url, proxy);
 
     if (!response.ok) {
       console.error('TMDB 获取季度详情失败:', response.status, response.statusText);
@@ -217,7 +228,7 @@ export async function getTVSeasonDetails(
  */
 export function getTMDBImageUrl(
   path: string | null,
-  size: string = 'w500'
+  size = 'w500'
 ): string {
   if (!path) return '';
 
@@ -226,5 +237,8 @@ export function getTMDBImageUrl(
     return path;
   }
 
-  return `https://image.tmdb.org/t/p/${size}${path}`;
+  const baseUrl = typeof window !== 'undefined'
+    ? localStorage.getItem('tmdbImageBaseUrl') || 'https://image.tmdb.org'
+    : 'https://image.tmdb.org';
+  return `${baseUrl}/t/p/${size}${path}`;
 }

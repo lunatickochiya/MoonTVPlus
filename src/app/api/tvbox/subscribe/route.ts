@@ -2,7 +2,6 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
-import { getAuthInfoFromCookie } from '@/lib/auth';
 import { getAvailableApiSites, getConfig } from '@/lib/config';
 import { getCachedLiveChannels } from '@/lib/live';
 
@@ -36,15 +35,11 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // 获取用户信息
-    const authInfo = getAuthInfoFromCookie(request);
-    const username = authInfo?.username;
-
     // 获取配置
     const config = await getConfig();
 
-    // 获取视频源
-    const apiSites = await getAvailableApiSites(username);
+    // 获取视频源（TVBox客户端不会发送Cookie，直接获取所有启用的源）
+    const apiSites = await getAvailableApiSites();
 
     // 获取直播源
     const liveConfig = config.LiveConfig?.filter(live => !live.disabled) || [];
@@ -71,6 +66,10 @@ export async function GET(request: NextRequest) {
       config.OpenListConfig?.Password
     );
 
+    // 获取所有启用的 Emby 源
+    const { embyManager } = await import('@/lib/emby-manager');
+    const embySources = await embyManager.getEnabledSources();
+
     // 构建 OpenList 站点配置
     const openlistSites = hasOpenList ? [{
       key: 'openlist',
@@ -83,6 +82,18 @@ export async function GET(request: NextRequest) {
       ext: '',
     }] : [];
 
+    // 构建 Emby 站点配置（为每个启用的Emby源生成独立站点）
+    const embySites = embySources.map(source => ({
+      key: `emby_${source.key}`,
+      name: source.name || 'Emby媒体库',
+      type: 1,
+      api: `${baseUrl}/api/emby/cms-proxy/${encodeURIComponent(subscribeToken)}?embyKey=${source.key}`,
+      searchable: 1,
+      quickSearch: 1,
+      filterable: 1,
+      ext: '',
+    }));
+
     // 构建TVBOX订阅数据
     const tvboxSubscription = {
       // 站点配置
@@ -90,9 +101,10 @@ export async function GET(request: NextRequest) {
       wallpaper: '',
 
       // 视频源站点 - 根据 adFilter 参数决定是否使用代理
-      // OpenList 源放在最前面
+      // OpenList 和 Emby 源放在最前面
       sites: [
         ...openlistSites,
+        ...embySites,
         ...apiSites.map(site => ({
           key: site.key,
           name: site.name,
@@ -142,6 +154,18 @@ export async function GET(request: NextRequest) {
       // 广告配置
       ads: [],
     };
+
+    // 获取屏蔽源列表并过滤
+    const blockedSources = process.env.TVBOX_BLOCKED_SOURCES
+      ? process.env.TVBOX_BLOCKED_SOURCES.split(',').map(s => s.trim()).filter(Boolean)
+      : [];
+
+    if (blockedSources.length > 0) {
+      tvboxSubscription.sites = tvboxSubscription.sites.filter(
+        site => !blockedSources.includes(site.key)
+      );
+      console.log('TVBOX 订阅已屏蔽源:', blockedSources);
+    }
 
     return NextResponse.json(tvboxSubscription, {
       headers: {

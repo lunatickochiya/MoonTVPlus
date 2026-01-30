@@ -45,13 +45,13 @@ export async function GET(request: NextRequest) {
         const { getCachedMetaInfo, setCachedMetaInfo } = await import('@/lib/openlist-cache');
         const { db } = await import('@/lib/db');
 
-        metaInfo = getCachedMetaInfo(rootPath);
+        metaInfo = getCachedMetaInfo();
 
         if (!metaInfo) {
           const metainfoJson = await db.getGlobalValue('video.metainfo');
           if (metainfoJson) {
             metaInfo = JSON.parse(metainfoJson);
-            setCachedMetaInfo(rootPath, metaInfo);
+            setCachedMetaInfo(metaInfo);
           }
         }
 
@@ -81,14 +81,31 @@ export async function GET(request: NextRequest) {
 
       let videoInfo = getCachedVideoInfo(folderPath);
 
-      const listResponse = await client.listDirectory(folderPath);
+      // 获取所有分页的视频文件
+      const allFiles: any[] = [];
+      let currentPage = 1;
+      const pageSize = 100;
+      let total = 0;
 
-      if (listResponse.code !== 200) {
-        throw new Error('OpenList 列表获取失败');
+      while (true) {
+        const listResponse = await client.listDirectory(folderPath, currentPage, pageSize);
+
+        if (listResponse.code !== 200) {
+          throw new Error('OpenList 列表获取失败');
+        }
+
+        total = listResponse.data.total;
+        allFiles.push(...listResponse.data.content);
+
+        if (allFiles.length >= total) {
+          break;
+        }
+
+        currentPage++;
       }
 
       const videoExtensions = ['.mp4', '.mkv', '.avi', '.m3u8', '.flv', '.ts', '.mov', '.wmv', '.webm', '.rmvb', '.rm', '.mpg', '.mpeg', '.3gp', '.f4v', '.m4v', '.vob'];
-      const videoFiles = listResponse.data.content.filter((item) => {
+      const videoFiles = allFiles.filter((item) => {
         if (item.is_dir || item.name.startsWith('.') || item.name.endsWith('.json')) return false;
         return videoExtensions.some(ext => item.name.toLowerCase().endsWith(ext));
       });
@@ -104,6 +121,7 @@ export async function GET(request: NextRequest) {
             season: parsed.season,
             title: parsed.title,
             parsed_from: 'filename',
+            isOVA: parsed.isOVA,
           };
         }
         setCachedVideoInfo(folderPath, videoInfo);
@@ -114,20 +132,26 @@ export async function GET(request: NextRequest) {
           const parsed = parseVideoFileName(file.name);
           let episodeInfo;
           if (parsed.episode) {
-            episodeInfo = { episode: parsed.episode, season: parsed.season, title: parsed.title, parsed_from: 'filename' };
+            episodeInfo = { episode: parsed.episode, season: parsed.season, title: parsed.title, parsed_from: 'filename', isOVA: parsed.isOVA };
           } else {
             episodeInfo = videoInfo!.episodes[file.name] || { episode: index + 1, season: undefined, title: undefined, parsed_from: 'filename' };
           }
           let displayTitle = episodeInfo.title;
           if (!displayTitle && episodeInfo.episode) {
-            displayTitle = `第${episodeInfo.episode}集`;
+            displayTitle = episodeInfo.isOVA ? `OVA ${episodeInfo.episode}` : `第${episodeInfo.episode}集`;
           }
           if (!displayTitle) {
             displayTitle = file.name;
           }
-          return { fileName: file.name, episode: episodeInfo.episode || 0, season: episodeInfo.season, title: displayTitle };
+          return { fileName: file.name, episode: episodeInfo.episode || 0, season: episodeInfo.season, title: displayTitle, isOVA: episodeInfo.isOVA };
         })
-        .sort((a, b) => a.episode !== b.episode ? a.episode - b.episode : a.fileName.localeCompare(b.fileName));
+        .sort((a, b) => {
+          // OVA 排在最后
+          if (a.isOVA && !b.isOVA) return 1;
+          if (!a.isOVA && b.isOVA) return -1;
+          // 都是 OVA 或都不是 OVA，按集数排序
+          return a.episode !== b.episode ? a.episode - b.episode : a.fileName.localeCompare(b.fileName);
+        });
 
       // 3. 从 metainfo 中获取元数据
       const { getTMDBImageUrl } = await import('@/lib/tmdb.search');

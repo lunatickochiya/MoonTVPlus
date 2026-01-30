@@ -2,13 +2,9 @@
 
 'use client';
 
-import Artplayer from 'artplayer';
-import Hls from 'hls.js';
 import { Heart, Radio, Tv } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useEffect, useRef, useState } from 'react';
-
-import { useLiveSync } from '@/hooks/useLiveSync';
+import { useEffect, useRef, useState } from 'react';
 
 import {
   deleteFavorite,
@@ -19,6 +15,7 @@ import {
   subscribeToDataUpdates,
 } from '@/lib/db.client';
 import { parseCustomTimeFormat } from '@/lib/time';
+import { useLiveSync } from '@/hooks/useLiveSync';
 
 import EpgScrollableRow from '@/components/EpgScrollableRow';
 import PageLayout from '@/components/PageLayout';
@@ -29,6 +26,10 @@ declare global {
     hls?: any;
   }
 }
+
+// 动态导入浏览器专用库
+let Artplayer: any = null;
+let Hls: any = null;
 
 // 直播频道接口
 interface LiveChannel {
@@ -53,6 +54,14 @@ interface LiveSource {
 }
 
 function LivePageClient() {
+  // 动态加载浏览器专用库
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      import('artplayer').then(mod => { Artplayer = mod.default; });
+      import('hls.js').then(mod => { Hls = mod.default; });
+    }
+  }, []);
+
   // -----------------------------------------------------------------------------
   // 状态变量（State）
   // -----------------------------------------------------------------------------
@@ -135,6 +144,7 @@ function LivePageClient() {
     currentChannelUrl: currentChannel?.url || '',
     onChannelChange: (channelId, channelUrl) => {
       // 房员接收到频道切换指令
+      if (!currentChannels || !Array.isArray(currentChannels)) return;
       const channel = currentChannels.find(c => c.id === channelId);
       if (channel) {
         handleChannelChange(channel);
@@ -801,7 +811,11 @@ function LivePageClient() {
       }
 
       // 动态导入anime4k-webgpu
-      const { render: anime4kRender, ModeA, ModeB, ModeC, ModeAA, ModeBB, ModeCA } = await import('anime4k-webgpu');
+      const { render: anime4kRender, ModeA, ModeB, ModeC, ModeAA, ModeBB, ModeCA } = await import(
+        /* webpackChunkName: "anime4k-webgpu" */
+        /* webpackMode: "lazy" */
+        'anime4k-webgpu'
+      );
 
       let ModeClass: any;
       const modeName = anime4kModeRef.current;
@@ -1089,6 +1103,8 @@ function LivePageClient() {
 
   // 过滤频道（根据分组和搜索关键词）
   const filterChannels = (group: string, keyword: string) => {
+    if (!currentChannels || !Array.isArray(currentChannels)) return [];
+
     let filtered = currentChannels.filter(channel => channel.group === group);
 
     // 如果有搜索关键词，进一步过滤
@@ -1133,10 +1149,10 @@ function LivePageClient() {
     if (!selectedGroup) return;
 
     // 先在当前分组搜索
-    let filtered = filterChannels(selectedGroup, keyword);
+    const filtered = filterChannels(selectedGroup, keyword);
 
     // 如果当前分组没有匹配的频道，且有搜索关键词，轮询所有分组
-    if (filtered.length === 0 && keyword.trim()) {
+    if (filtered.length === 0 && keyword.trim() && groupedChannels) {
       const groups = Object.keys(groupedChannels);
 
       // 轮询所有分组，找到第一个有匹配频道的分组
@@ -1271,13 +1287,13 @@ function LivePageClient() {
 
   // 当分组切换时，将激活的分组标签滚动到视口中间
   useEffect(() => {
-    if (!selectedGroup || !groupContainerRef.current) return;
+    if (!selectedGroup || !groupContainerRef.current || !groupedChannels) return;
 
     const groupKeys = Object.keys(groupedChannels);
     const groupIndex = groupKeys.indexOf(selectedGroup);
     if (groupIndex === -1) return;
 
-    const btn = groupButtonRefs.current[groupIndex];
+    const btn = groupButtonRefs.current?.[groupIndex];
     const container = groupContainerRef.current;
     if (btn && container) {
       // 手动计算滚动位置，只滚动分组标签容器
@@ -1301,49 +1317,49 @@ function LivePageClient() {
     }
   }, [selectedGroup, groupedChannels]);
 
-  class CustomHlsJsLoader extends Hls.DefaultConfig.loader {
-    constructor(config: any) {
-      super(config);
-      const load = this.load.bind(this);
-      this.load = function (context: any, config: any, callbacks: any) {
-        // 所有的请求都带一个 source 参数
-        try {
-          const url = new URL(context.url);
-          url.searchParams.set('moontv-source', currentSourceRef.current?.key || '');
-          context.url = url.toString();
-        } catch (error) {
-          // ignore
-        }
-        // 拦截manifest和level请求
-        if (
-          (context as any).type === 'manifest' ||
-          (context as any).type === 'level'
-        ) {
-          // 判断是否浏览器直连
-          const isLiveDirectConnectStr = localStorage.getItem('liveDirectConnect');
-          const isLiveDirectConnect = isLiveDirectConnectStr === 'true';
-          if (isLiveDirectConnect) {
-            // 浏览器直连，使用 URL 对象处理参数
-            try {
-              const url = new URL(context.url);
-              url.searchParams.set('allowCORS', 'true');
-              context.url = url.toString();
-            } catch (error) {
-              // 如果 URL 解析失败，回退到字符串拼接
-              context.url = context.url + '&allowCORS=true';
-            }
-          }
-        }
-        // 执行原始load方法
-        load(context, config, callbacks);
-      };
-    }
-  }
-
   function m3u8Loader(video: HTMLVideoElement, url: string) {
     if (!Hls) {
       console.error('HLS.js 未加载');
       return;
+    }
+
+    class CustomHlsJsLoader extends Hls.DefaultConfig.loader {
+      constructor(config: any) {
+        super(config);
+        const load = this.load.bind(this);
+        this.load = function (context: any, config: any, callbacks: any) {
+          // 所有的请求都带一个 source 参数
+          try {
+            const url = new URL(context.url);
+            url.searchParams.set('moontv-source', currentSourceRef.current?.key || '');
+            context.url = url.toString();
+          } catch (error) {
+            // ignore
+          }
+          // 拦截manifest和level请求
+          if (
+            (context as any).type === 'manifest' ||
+            (context as any).type === 'level'
+          ) {
+            // 判断是否浏览器直连
+            const isLiveDirectConnectStr = localStorage.getItem('liveDirectConnect');
+            const isLiveDirectConnect = isLiveDirectConnectStr === 'true';
+            if (isLiveDirectConnect) {
+              // 浏览器直连，使用 URL 对象处理参数
+              try {
+                const url = new URL(context.url);
+                url.searchParams.set('allowCORS', 'true');
+                context.url = url.toString();
+              } catch (error) {
+                // 如果 URL 解析失败，回退到字符串拼接
+                context.url = context.url + '&allowCORS=true';
+              }
+            }
+          }
+          // 执行原始load方法
+          load(context, config, callbacks);
+        };
+      }
     }
 
     // 清理之前的 HLS 实例
@@ -1411,15 +1427,26 @@ function LivePageClient() {
 
       // precheck type
       let type = 'm3u8';
-      const precheckUrl = `/api/live/precheck?url=${encodeURIComponent(videoUrl)}&moontv-source=${currentSourceRef.current?.key || ''}`;
-      const precheckResponse = await fetch(precheckUrl);
-      if (!precheckResponse.ok) {
-        console.error('预检查失败:', precheckResponse.statusText);
+      try {
+        const precheckUrl = `/api/live/precheck?url=${encodeURIComponent(videoUrl)}&moontv-source=${currentSourceRef.current?.key || ''}`;
+        const precheckResponse = await fetch(precheckUrl);
+        if (!precheckResponse.ok) {
+          console.error('预检查失败:', precheckResponse.statusText);
+          setIsVideoLoading(false);
+          return;
+        }
+        const precheckResult = await precheckResponse.json();
+        if (precheckResult?.success && precheckResult?.type) {
+          type = precheckResult.type;
+        } else {
+          console.error('预检查返回无效结果:', precheckResult);
+          setIsVideoLoading(false);
+          return;
+        }
+      } catch (err) {
+        console.error('预检查异常:', err);
+        setIsVideoLoading(false);
         return;
-      }
-      const precheckResult = await precheckResponse.json();
-      if (precheckResult.success) {
-        type = precheckResult.type;
       }
 
       // 如果不是 m3u8 类型，设置不支持的类型并返回
@@ -2221,7 +2248,7 @@ function LivePageClient() {
                         }}
                       >
                         <div className='flex gap-4 min-w-max'>
-                          {Object.keys(groupedChannels).map((group, index) => (
+                          {groupedChannels && Object.keys(groupedChannels).map((group, index) => (
                             <button
                               key={group}
                               data-group={group}
@@ -2253,7 +2280,7 @@ function LivePageClient() {
 
                     {/* 频道列表 */}
                     <div ref={channelListRef} className='flex-1 overflow-y-auto space-y-2 pb-4'>
-                      {filteredChannels.length > 0 ? (
+                      {filteredChannels?.length > 0 ? (
                         filteredChannels.map(channel => {
                           const isActive = channel.id === currentChannel?.id;
                           return (
@@ -2331,7 +2358,7 @@ function LivePageClient() {
                 {activeTab === 'sources' && (
                   <div className='flex flex-col h-full mt-4'>
                     <div className='flex-1 overflow-y-auto space-y-2 pb-20'>
-                      {liveSources.length > 0 ? (
+                      {liveSources?.length > 0 ? (
                         liveSources.map((source) => {
                           const isCurrentSource = source.key === currentSource?.key;
                           return (
@@ -2469,9 +2496,5 @@ const FavoriteIcon = ({ filled }: { filled: boolean }) => {
 };
 
 export default function LivePage() {
-  return (
-    <Suspense fallback={<div>Loading...</div>}>
-      <LivePageClient />
-    </Suspense>
-  );
+  return <LivePageClient />;
 }

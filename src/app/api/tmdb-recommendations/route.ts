@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
+
+import { getConfig } from '@/lib/config';
 import {
-  searchTMDBMulti,
+  getTMDBImageUrl,
   getTMDBMovieRecommendations,
   getTMDBTVRecommendations,
-  getTMDBImageUrl,
+  searchTMDBMulti,
 } from '@/lib/tmdb.client';
-import { getConfig } from '@/lib/config';
 
 // 服务器端缓存（1天）
 const searchCache = new Map<string, { data: any; timestamp: number }>();
@@ -62,6 +63,7 @@ export async function GET(request: NextRequest) {
     const config = await getConfig();
     const tmdbApiKey = config.SiteConfig.TMDBApiKey;
     const tmdbProxy = config.SiteConfig.TMDBProxy;
+    const tmdbReverseProxy = config.SiteConfig.TMDBReverseProxy;
 
     if (!tmdbApiKey) {
       return NextResponse.json(
@@ -90,7 +92,7 @@ export async function GET(request: NextRequest) {
         mediaType = cached.data.mediaType;
       } else {
         // 搜索TMDB
-        const searchResult = await searchTMDBMulti(tmdbApiKey, cleanedTitle, tmdbProxy);
+        const searchResult = await searchTMDBMulti(tmdbApiKey, cleanedTitle, tmdbProxy, tmdbReverseProxy);
 
         if (searchResult.code !== 200 || !searchResult.results.length) {
           return NextResponse.json(
@@ -145,8 +147,8 @@ export async function GET(request: NextRequest) {
     // 获取推荐
     const recommendationsResult =
       mediaType === 'movie'
-        ? await getTMDBMovieRecommendations(tmdbApiKey, tmdbId, tmdbProxy)
-        : await getTMDBTVRecommendations(tmdbApiKey, tmdbId, tmdbProxy);
+        ? await getTMDBMovieRecommendations(tmdbApiKey, tmdbId, tmdbProxy, tmdbReverseProxy)
+        : await getTMDBTVRecommendations(tmdbApiKey, tmdbId, tmdbProxy, tmdbReverseProxy);
 
     if (recommendationsResult.code !== 200) {
       return NextResponse.json(

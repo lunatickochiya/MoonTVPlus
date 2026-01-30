@@ -43,10 +43,13 @@ export async function POST(request: NextRequest) {
       DanmakuApiToken,
       TMDBApiKey,
       TMDBProxy,
+      TMDBReverseProxy,
       BannerDataSource,
+      RecommendationDataSource,
       PansouApiUrl,
       PansouUsername,
       PansouPassword,
+      PansouKeywordBlocklist,
       EnableComments,
       CustomAdFilterCode,
       CustomAdFilterVersion,
@@ -81,10 +84,13 @@ export async function POST(request: NextRequest) {
       DanmakuApiToken: string;
       TMDBApiKey?: string;
       TMDBProxy?: string;
+      TMDBReverseProxy?: string;
       BannerDataSource?: string;
+      RecommendationDataSource?: string;
       PansouApiUrl?: string;
       PansouUsername?: string;
       PansouPassword?: string;
+      PansouKeywordBlocklist?: string;
       EnableComments: boolean;
       CustomAdFilterCode?: string;
       CustomAdFilterVersion?: number;
@@ -122,7 +128,10 @@ export async function POST(request: NextRequest) {
       typeof DanmakuApiToken !== 'string' ||
       (TMDBApiKey !== undefined && typeof TMDBApiKey !== 'string') ||
       (TMDBProxy !== undefined && typeof TMDBProxy !== 'string') ||
+      (TMDBReverseProxy !== undefined && typeof TMDBReverseProxy !== 'string') ||
       (BannerDataSource !== undefined && typeof BannerDataSource !== 'string') ||
+      (RecommendationDataSource !== undefined && typeof RecommendationDataSource !== 'string') ||
+      (PansouKeywordBlocklist !== undefined && typeof PansouKeywordBlocklist !== 'string') ||
       typeof EnableComments !== 'boolean' ||
       (CustomAdFilterCode !== undefined && typeof CustomAdFilterCode !== 'string') ||
       (CustomAdFilterVersion !== undefined && typeof CustomAdFilterVersion !== 'number') ||
@@ -172,10 +181,13 @@ export async function POST(request: NextRequest) {
       DanmakuApiToken,
       TMDBApiKey,
       TMDBProxy,
+      TMDBReverseProxy,
       BannerDataSource,
+      RecommendationDataSource,
       PansouApiUrl,
       PansouUsername,
       PansouPassword,
+      PansouKeywordBlocklist,
       EnableComments,
       CustomAdFilterCode,
       CustomAdFilterVersion,

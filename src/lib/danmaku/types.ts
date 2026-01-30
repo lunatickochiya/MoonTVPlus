@@ -57,6 +57,7 @@ export interface DanmakuSettings {
   filterRules: string[]; // 过滤规则（正则表达式）
   unlimited: boolean; // 无限弹幕
   synchronousPlayback: boolean; // 同步播放
+  maxCount?: number; // 弹幕加载上限
 }
 
 // 自动匹配请求
@@ -114,4 +115,6 @@ export interface DanmakuSelection {
   animeTitle: string;
   episodeTitle: string;
   searchKeyword?: string; // 用户搜索时使用的关键词
+  danmakuCount?: number; // 弹幕数量
+  danmakuOriginalCount?: number; // 原始弹幕数量
 }

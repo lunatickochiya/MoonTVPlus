@@ -33,12 +33,32 @@ export async function GET(request: NextRequest) {
   const config = await getConfig();
   const apiSites = await getAvailableApiSites(authInfo.username);
 
+  // 创建权重映射表
+  const weightMap = new Map<string, number>();
+  config.SourceConfig.forEach(source => {
+    weightMap.set(source.key, source.weight ?? 0);
+  });
+
+  // 按权重降序排序 apiSites
+  const sortedApiSites = [...apiSites].sort((a, b) => {
+    const weightA = weightMap.get(a.key) ?? 0;
+    const weightB = weightMap.get(b.key) ?? 0;
+    return weightB - weightA;
+  });
+
   // 检查是否配置了 OpenList
   const hasOpenList = !!(
     config.OpenListConfig?.Enabled &&
     config.OpenListConfig?.URL &&
     config.OpenListConfig?.Username &&
     config.OpenListConfig?.Password
+  );
+
+  // 检查是否配置了 Emby（支持多源）
+  const hasEmby = !!(
+    config.EmbyConfig?.Sources &&
+    config.EmbyConfig.Sources.length > 0 &&
+    config.EmbyConfig.Sources.some(s => s.enabled && s.ServerURL)
   );
 
   // 共享状态
@@ -66,11 +86,23 @@ export async function GET(request: NextRequest) {
         }
       };
 
+      // 获取 Emby 源数量
+      let embySourcesCount = 0;
+      if (hasEmby) {
+        try {
+          const { embyManager } = await import('@/lib/emby-manager');
+          const embySourcesMap = await embyManager.getAllClients();
+          embySourcesCount = embySourcesMap.size;
+        } catch (error) {
+          console.error('[Search WS] 获取 Emby 源数量失败:', error);
+        }
+      }
+
       // 发送开始事件
       const startEvent = `data: ${JSON.stringify({
         type: 'start',
         query,
-        totalSources: apiSites.length + (hasOpenList ? 1 : 0),
+        totalSources: sortedApiSites.length + (hasOpenList ? 1 : 0) + embySourcesCount,
         timestamp: Date.now()
       })}\n\n`;
 
@@ -82,75 +114,185 @@ export async function GET(request: NextRequest) {
       let completedSources = 0;
       const allResults: any[] = [];
 
-      // 搜索 OpenList（如果配置了）
-      if (hasOpenList) {
-        try {
-          const { getCachedMetaInfo, setCachedMetaInfo } = await import('@/lib/openlist-cache');
-          const { getTMDBImageUrl } = await import('@/lib/tmdb.search');
-          const { db } = await import('@/lib/db');
+      // 搜索 Emby（如果配置了）- 异步带超时，支持多源
+      if (hasEmby) {
+        (async () => {
+          let embyCompletedCount = 0;
+          try {
+            const { embyManager } = await import('@/lib/emby-manager');
+            const embySourcesMap = await embyManager.getAllClients();
+            const embySources = Array.from(embySourcesMap.values());
 
-          const rootPath = config.OpenListConfig!.RootPath || '/';
-          let metaInfo = getCachedMetaInfo(rootPath);
+            // 为每个 Emby 源并发搜索，并单独发送结果
+            const embySearchPromises = embySources.map(async ({ client, config: embyConfig }) => {
+              try {
+                const searchResult = await client.getItems({
+                  searchTerm: query,
+                  IncludeItemTypes: 'Movie,Series',
+                  Recursive: true,
+                  Fields: 'Overview,ProductionYear',
+                  Limit: 50,
+                });
 
-          // 如果没有缓存，尝试从数据库读取
-          if (!metaInfo) {
-            try {
-              const metainfoJson = await db.getGlobalValue('video.metainfo');
-              if (metainfoJson) {
-                metaInfo = JSON.parse(metainfoJson);
-                if (metaInfo) {
-                  setCachedMetaInfo(rootPath, metaInfo);
+                const sourceValue = embySources.length === 1 ? 'emby' : `emby_${embyConfig.key}`;
+                const sourceName = embySources.length === 1 ? 'Emby' : embyConfig.name;
+
+                // 添加安全检查，确保 Items 存在且是数组
+                const items = Array.isArray(searchResult?.Items) ? searchResult.Items : [];
+                const results = items.map((item) => ({
+                  id: item.Id,
+                  source: sourceValue,
+                  source_name: sourceName,
+                  title: item.Name,
+                  poster: client.getImageUrl(item.Id, 'Primary'),
+                  episodes: [],
+                  episodes_titles: [],
+                  year: item.ProductionYear?.toString() || '',
+                  desc: item.Overview || '',
+                  type_name: item.Type === 'Movie' ? '电影' : '电视剧',
+                  douban_id: 0,
+                }));
+
+                // 单独发送每个源的结果
+                embyCompletedCount++;
+                completedSources++;
+                if (!streamClosed) {
+                  const sourceEvent = `data: ${JSON.stringify({
+                    type: 'source_result',
+                    source: sourceValue,
+                    sourceName: sourceName,
+                    results: results,
+                    timestamp: Date.now()
+                  })}\n\n`;
+                  if (safeEnqueue(encoder.encode(sourceEvent))) {
+                    if (results.length > 0) {
+                      allResults.push(...results);
+                    }
+                  } else {
+                    streamClosed = true;
+                  }
                 }
+
+                return results;
+              } catch (error) {
+                console.error(`[Search WS] 搜索 ${embyConfig.name} 失败:`, error);
+                embyCompletedCount++;
+                completedSources++;
+                // 发送空结果
+                if (!streamClosed) {
+                  const sourceValue = embySources.length === 1 ? 'emby' : `emby_${embyConfig.key}`;
+                  const sourceName = embySources.length === 1 ? 'Emby' : embyConfig.name;
+                  const sourceEvent = `data: ${JSON.stringify({
+                    type: 'source_result',
+                    source: sourceValue,
+                    sourceName: sourceName,
+                    results: [],
+                    timestamp: Date.now()
+                  })}\n\n`;
+                  safeEnqueue(encoder.encode(sourceEvent));
+                }
+                return [];
               }
-            } catch (error) {
-              console.error('[Search WS] 从数据库读取 metainfo 失败:', error);
+            });
+
+            await Promise.all(embySearchPromises);
+          } catch (error) {
+            console.error('[Search WS] 搜索 Emby 整体失败:', error);
+            // 如果整个 emby 搜索失败，需要补齐未完成的源
+            const remainingSources = embySourcesCount - embyCompletedCount;
+            for (let i = 0; i < remainingSources; i++) {
+              completedSources++;
+              if (!streamClosed) {
+                const sourceEvent = `data: ${JSON.stringify({
+                  type: 'source_result',
+                  source: 'emby',
+                  sourceName: 'Emby',
+                  results: [],
+                  timestamp: Date.now()
+                })}\n\n`;
+                safeEnqueue(encoder.encode(sourceEvent));
+              }
             }
           }
+        })();
+      }
 
-          if (metaInfo && metaInfo.folders) {
-            const openlistResults = Object.entries(metaInfo.folders)
-              .filter(([key, info]: [string, any]) => {
-                const matchFolder = info.folderName.toLowerCase().includes(query.toLowerCase());
-                const matchTitle = info.title.toLowerCase().includes(query.toLowerCase());
-                return matchFolder || matchTitle;
-              })
-              .map(([key, info]: [string, any]) => ({
-                id: key,
-                source: 'openlist',
-                source_name: '私人影库',
-                title: info.title,
-                poster: getTMDBImageUrl(info.poster_path),
-                episodes: [],
-                episodes_titles: [],
-                year: info.release_date.split('-')[0] || '',
-                desc: info.overview,
-                type_name: info.media_type === 'movie' ? '电影' : '电视剧',
-                douban_id: 0,
-              }));
+      // 搜索 OpenList（如果配置了）- 异步带超时
+      if (hasOpenList) {
+        Promise.race([
+          (async () => {
+            try {
+              const { getCachedMetaInfo, setCachedMetaInfo } = await import('@/lib/openlist-cache');
+              const { getTMDBImageUrl } = await import('@/lib/tmdb.search');
+              const { db } = await import('@/lib/db');
 
+              let metaInfo = getCachedMetaInfo();
+
+              if (!metaInfo) {
+                const metainfoJson = await db.getGlobalValue('video.metainfo');
+                if (metainfoJson) {
+                  metaInfo = JSON.parse(metainfoJson);
+                  if (metaInfo) {
+                    setCachedMetaInfo(metaInfo);
+                  }
+                }
+              }
+
+              if (metaInfo && metaInfo.folders) {
+                return Object.entries(metaInfo.folders)
+                  .filter(([key, info]: [string, any]) => {
+                    const matchFolder = info.folderName.toLowerCase().includes(query.toLowerCase());
+                    const matchTitle = info.title.toLowerCase().includes(query.toLowerCase());
+                    return matchFolder || matchTitle;
+                  })
+                  .map(([key, info]: [string, any]) => ({
+                    id: key,
+                    source: 'openlist',
+                    source_name: '私人影库',
+                    title: info.title,
+                    poster: getTMDBImageUrl(info.poster_path),
+                    episodes: [],
+                    episodes_titles: [],
+                    year: info.release_date.split('-')[0] || '',
+                    desc: info.overview,
+                    type_name: info.media_type === 'movie' ? '电影' : '电视剧',
+                    douban_id: 0,
+                  }));
+              }
+              return [];
+            } catch (error) {
+              console.error('[Search WS] 搜索 OpenList 失败:', error);
+              return [];
+            }
+          })(),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('OpenList timeout')), 20000)
+          ),
+        ])
+          .then((openlistResults: any) => {
             completedSources++;
-
             if (!streamClosed) {
+              // 添加安全检查，确保结果是数组
+              const safeResults = Array.isArray(openlistResults) ? openlistResults : [];
               const sourceEvent = `data: ${JSON.stringify({
                 type: 'source_result',
                 source: 'openlist',
                 sourceName: '私人影库',
-                results: openlistResults,
+                results: safeResults,
                 timestamp: Date.now()
               })}\n\n`;
-
               if (!safeEnqueue(encoder.encode(sourceEvent))) {
                 streamClosed = true;
                 return;
               }
-
-              if (openlistResults.length > 0) {
-                allResults.push(...openlistResults);
+              if (safeResults.length > 0) {
+                allResults.push(...safeResults);
               }
             }
-          } else {
+          })
+          .catch((error) => {
+            console.error('[Search WS] 搜索 OpenList 超时:', error);
             completedSources++;
-
             if (!streamClosed) {
               const sourceEvent = `data: ${JSON.stringify({
                 type: 'source_result',
@@ -159,36 +301,13 @@ export async function GET(request: NextRequest) {
                 results: [],
                 timestamp: Date.now()
               })}\n\n`;
-
-              if (!safeEnqueue(encoder.encode(sourceEvent))) {
-                streamClosed = true;
-                return;
-              }
+              safeEnqueue(encoder.encode(sourceEvent));
             }
-          }
-        } catch (error) {
-          console.error('[Search WS] 搜索 OpenList 失败:', error);
-          completedSources++;
-
-          if (!streamClosed) {
-            const errorEvent = `data: ${JSON.stringify({
-              type: 'source_error',
-              source: 'openlist',
-              sourceName: '私人影库',
-              error: error instanceof Error ? error.message : '搜索失败',
-              timestamp: Date.now()
-            })}\n\n`;
-
-            if (!safeEnqueue(encoder.encode(errorEvent))) {
-              streamClosed = true;
-              return;
-            }
-          }
-        }
+          });
       }
 
       // 为每个源创建搜索 Promise
-      const searchPromises = apiSites.map(async (site) => {
+      const searchPromises = sortedApiSites.map(async (site) => {
         try {
           // 添加超时控制
           const searchPromise = Promise.race([
@@ -200,10 +319,13 @@ export async function GET(request: NextRequest) {
 
           const results = await searchPromise as any[];
 
+          // 添加安全检查，确保结果是数组
+          const safeResults = Array.isArray(results) ? results : [];
+
           // 过滤黄色内容
-          let filteredResults = results;
+          let filteredResults = safeResults;
           if (!config.SiteConfig.DisableYellowFilter) {
-            filteredResults = results.filter((result) => {
+            filteredResults = safeResults.filter((result) => {
               const typeName = result.type_name || '';
               return !yellowWords.some((word: string) => typeName.includes(word));
             });
@@ -254,7 +376,7 @@ export async function GET(request: NextRequest) {
         }
 
         // 检查是否所有源都已完成
-        if (completedSources === apiSites.length + (hasOpenList ? 1 : 0)) {
+        if (completedSources === sortedApiSites.length + (hasOpenList ? 1 : 0) + embySourcesCount) {
           if (!streamClosed) {
             // 发送最终完成事件
             const completeEvent = `data: ${JSON.stringify({

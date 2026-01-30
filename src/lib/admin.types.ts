@@ -22,12 +22,14 @@ export interface AdminConfig {
     // TMDB配置
     TMDBApiKey?: string;
     TMDBProxy?: string;
-    BannerDataSource?: string; // 轮播图数据源：TMDB 或 TX
+    TMDBReverseProxy?: string;
+    BannerDataSource?: string; // 轮播图数据源：TMDB、TX 或 Douban
     RecommendationDataSource?: string; // 更多推荐数据源：Douban、TMDB、Mixed、MixedSmart
     // Pansou配置
     PansouApiUrl?: string;
     PansouUsername?: string;
     PansouPassword?: string;
+    PansouKeywordBlocklist?: string;
     // 评论功能开关
     EnableComments: boolean;
     // 自定义去广告代码
@@ -40,6 +42,9 @@ export interface AdminConfig {
     TurnstileSiteKey?: string; // Cloudflare Turnstile Site Key
     TurnstileSecretKey?: string; // Cloudflare Turnstile Secret Key
     DefaultUserTags?: string[]; // 新注册用户的默认用户组
+    // 求片功能配置
+    EnableMovieRequest?: boolean; // 启用求片功能
+    MovieRequestCooldown?: number; // 求片冷却时间（秒），默认3600
     // OIDC配置
     EnableOIDCLogin?: boolean; // 启用OIDC登录
     EnableOIDCRegistration?: boolean; // 启用OIDC注册
@@ -73,6 +78,7 @@ export interface AdminConfig {
     from: 'config' | 'custom';
     disabled?: boolean;
     proxyMode?: boolean; // 代理模式开关：启用后由服务器代理m3u8和ts分片
+    weight?: number; // 权重：用于排序和优选评分，默认0，范围0-100
   }[];
   CustomCategories: {
     name?: string;
@@ -91,6 +97,15 @@ export interface AdminConfig {
     channelNumber?: number;
     disabled?: boolean;
   }[];
+  WebLiveConfig?: {
+    key: string;
+    name: string;
+    platform: string; // 直播平台类型，如 'huya'
+    roomId: string; // 房间ID
+    from: 'config' | 'custom';
+    disabled?: boolean;
+  }[];
+  WebLiveEnabled?: boolean; // 网络直播功能总开关
   ThemeConfig?: {
     enableBuiltInTheme: boolean; // 是否启用内置主题
     builtInTheme: string; // 内置主题名称
@@ -106,11 +121,14 @@ export interface AdminConfig {
     URL: string; // OpenList 服务器地址
     Username: string; // 账号（用于登录获取Token）
     Password: string; // 密码（用于登录获取Token）
-    RootPath: string; // 根目录路径，默认 "/"
+    RootPath?: string; // 旧字段：根目录路径（向后兼容，迁移后删除）
+    RootPaths?: string[]; // 新字段：多根目录路径列表
     OfflineDownloadPath: string; // 离线下载目录，默认 "/"
     LastRefreshTime?: number; // 上次刷新时间戳
     ResourceCount?: number; // 资源数量
     ScanInterval?: number; // 定时扫描间隔（分钟），0表示关闭，最低60分钟
+    ScanMode?: 'torrent' | 'name' | 'hybrid'; // 扫描模式：torrent=种子库匹配，name=名字匹配，hybrid=混合模式（默认）
+    DisableVideoPreview?: boolean; // 禁用预览视频，直接返回直连链接
   };
   AIConfig?: {
     Enabled: boolean; // 是否启用AI问片功能
@@ -153,6 +171,70 @@ export interface AdminConfig {
     Temperature?: number; // AI温度参数（0-2），默认0.7
     MaxTokens?: number; // 最大回复token数，默认1000
     SystemPrompt?: string; // 自定义系统提示词
+    EnableStreaming?: boolean; // 是否启用流式响应，默认true
+    // AI问片默认消息配置
+    DefaultMessageNoVideo?: string; // 无视频时的默认消息
+    DefaultMessageWithVideo?: string; // 有视频时的默认消息（支持 {title} 替换符）
+  };
+  EmbyConfig?: {
+    // 新格式：多源配置（推荐）
+    Sources?: Array<{
+      key: string; // 唯一标识，如 'emby1', 'emby2'
+      name: string; // 显示名称，如 '家庭Emby', '公司Emby'
+      enabled: boolean; // 是否启用
+      ServerURL: string; // Emby服务器地址
+      ApiKey?: string; // API Key（推荐方式）
+      Username?: string; // 用户名（或使用API Key）
+      Password?: string; // 密码
+      UserId?: string; // 用户ID（登录后获取）
+      AuthToken?: string; // 认证令牌（用户名密码登录后获取）
+      Libraries?: string[]; // 要显示的媒体库ID（可选，默认全部）
+      LastSyncTime?: number; // 最后同步时间戳
+      ItemCount?: number; // 媒体项数量
+      isDefault?: boolean; // 是否为默认源（用于向后兼容）
+      // 高级流媒体选项
+      removeEmbyPrefix?: boolean; // 播放链接移除/emby前缀
+      appendMediaSourceId?: boolean; // 拼接MediaSourceId参数
+      transcodeMp4?: boolean; // 转码mp4
+      proxyPlay?: boolean; // 视频播放代理开关
+    }>;
+    // 旧格式：单源配置（向后兼容）
+    Enabled?: boolean;
+    ServerURL?: string;
+    ApiKey?: string;
+    Username?: string;
+    Password?: string;
+    UserId?: string;
+    AuthToken?: string;
+    Libraries?: string[];
+    LastSyncTime?: number;
+    ItemCount?: number;
+  };
+  XiaoyaConfig?: {
+    Enabled: boolean; // 是否启用
+    ServerURL: string; // Alist 服务器地址
+    Token?: string; // Token 认证（推荐）
+    Username?: string; // 用户名认证（备选）
+    Password?: string; // 密码认证（备选）
+    DisableVideoPreview?: boolean; // 禁用预览视频，直接返回直连链接
+  };
+  EmailConfig?: {
+    enabled: boolean; // 是否启用邮件通知
+    provider: 'smtp' | 'resend'; // 邮件发送方式
+    // SMTP配置
+    smtp?: {
+      host: string; // SMTP服务器地址
+      port: number; // SMTP端口（25/465/587）
+      secure: boolean; // 是否使用SSL/TLS
+      user: string; // SMTP用户名
+      password: string; // SMTP密码
+      from: string; // 发件人邮箱
+    };
+    // Resend配置
+    resend?: {
+      apiKey: string; // Resend API Key
+      from: string; // 发件人邮箱
+    };
   };
 }
 
