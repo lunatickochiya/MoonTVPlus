@@ -142,8 +142,14 @@ async function replaceAudioUrlsWithOpenList(
 
     const audioPath = `${cachePath}/${platform}/audio/${song.id}-${quality}.mp3`;
 
+    // 如果缓存中已经标记为已缓存，且使用代理模式，直接返回代理URL
+    if (song.cached === true && cacheProxyEnabled) {
+      song.url = `/api/music/audio-proxy?platform=${platform}&id=${song.id}&quality=${quality}`;
+      continue;
+    }
+
     try {
-      // 每次都动态获取最新的 raw_url（因为 OpenList 的 URL 会过期）
+      // 只有在未确认缓存状态时才调用 getFile()
       const fileResponse = await openListClient.getFile(audioPath);
 
       if (fileResponse.code === 200 && fileResponse.data?.raw_url) {
