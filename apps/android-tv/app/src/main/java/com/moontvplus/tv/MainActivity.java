@@ -14,9 +14,11 @@ import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
-import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
+import com.tencent.smtt.sdk.QbSdk;
+import com.tencent.smtt.sdk.WebSettings;
+import com.tencent.smtt.sdk.WebView;
 
 public class MainActivity extends Activity {
     private FrameLayout root;
@@ -38,10 +40,29 @@ public class MainActivity extends Activity {
                         | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
         );
 
+        // 初始化腾讯 X5 内核
+        initX5WebView();
+
         root = new FrameLayout(this);
         setContentView(root);
         setupWebView();
         webView.loadUrl(buildTvUrl(BuildConfig.BASE_URL));
+    }
+
+    private void initX5WebView() {
+        // 启用 X5 内核初始化
+        QbSdk.PreInitCallback cb = new QbSdk.PreInitCallback() {
+            @Override
+            public void onViewInitFinished(boolean success) {
+                // X5 内核初始化完成回调
+            }
+
+            @Override
+            public void onCoreInitFinished() {
+                // X5 核心初始化完成
+            }
+        };
+        QbSdk.initX5Environment(getApplicationContext(), cb);
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -70,17 +91,17 @@ public class MainActivity extends Activity {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
             settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         }
-        settings.setUserAgentString(settings.getUserAgentString() + " MoonTVPlusAndroidTV");
+        settings.setUserAgentString(settings.getUserAgentString() + " MoonTVPlusAndroidTV X5");
 
-        webView.setWebViewClient(new WebViewClient() {
+        webView.setWebViewClient(new com.tencent.smtt.sdk.WebViewClient() {
             @Override
-            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+            public boolean shouldOverrideUrlLoading(WebView view, String url) {
                 return false;
             }
 
             @Override
-            public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
-                super.onReceivedError(view, request, error);
+            public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
+                super.onReceivedError(view, errorCode, description, failingUrl);
             }
 
             @Override
@@ -89,14 +110,14 @@ public class MainActivity extends Activity {
             }
 
             @Override
-            public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
+            public void onReceivedSslError(WebView view, com.tencent.smtt.sdk.SslErrorHandler handler, SslError error) {
                 // Do not bypass TLS certificate errors. HTTP is allowed by network security config;
                 // invalid HTTPS certificates should still be blocked for safety.
                 handler.cancel();
             }
         });
 
-        webView.setWebChromeClient(new WebChromeClient() {
+        webView.setWebChromeClient(new com.tencent.smtt.sdk.WebChromeClient() {
             @Override
             public void onShowCustomView(View view, CustomViewCallback callback) {
                 if (customView != null) {
