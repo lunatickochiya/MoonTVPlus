@@ -1,6 +1,6 @@
 # MoonTVPlus Android TV
 
-这是一个极简 Android TV WebView 壳工程，用于打开 MoonTVPlus Web TV 页面。
+这是一个基于腾讯 X5 内核的 Android TV 播放器壳工程，用于打开 MoonTVPlus Web TV 页面。
 
 ## 构建参数
 
@@ -24,4 +24,11 @@ BASE_URL 去掉末尾 / 后 + /tv
 - 允许 HTTP 明文访问
 - 允许 HTTPS 页面加载 HTTP 视频/图片等混合内容
 - 使用 `public/logo.png` 作为图标来源
-- User-Agent 追加 `MoonTVPlusAndroidTV`
+- User-Agent 追加 `MoonTVPlusAndroidTV X5`
+
+## X5 内核优势
+
+- **更好的兼容性**: 腾讯 X5 内核针对国内视频网站进行了深度优化
+- **视频播放性能**: 支持更多视频格式和解码方案，提供更流畅的播放体验
+- **深度集成**: 与原生 Android WebView 接口兼容，无缝替换
+- **安全性**: 腾讯官方维护，定期更新安全补丁
