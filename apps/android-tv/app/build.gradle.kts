@@ -69,3 +69,8 @@ android {
         }
     }
 }
+
+dependencies {
+    // 腾讯 X5 WebView 内核 - 提供更好的兼容性和性能
+    implementation("com.tencent.tbs:tbssdk:44541")
+}
