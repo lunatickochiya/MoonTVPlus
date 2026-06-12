@@ -93,5 +93,5 @@ android {
 }
 
 dependencies {
-    add("geckoImplementation", "org.mozilla.geckoview:geckoview:$geckoViewVersion")
+    add("geckoImplementation", "org.mozilla.geckoview:geckoview-armeabi-v7a:$geckoViewVersion")
 }
