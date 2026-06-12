@@ -13,8 +13,8 @@ import org.mozilla.geckoview.GeckoSession;
 import org.mozilla.geckoview.GeckoView;
 
 public class MainActivity extends Activity {
-
     private static GeckoRuntime runtime;
+
     private GeckoSession session;
     private GeckoView geckoView;
     private boolean canGoBack = false;
@@ -23,19 +23,19 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // 隐藏所有系统标题栏 + 全屏沉浸模式（TV 常用）
+        // 隐藏标题栏并全屏
         requestWindowFeature(Window.FEATURE_NO_TITLE);
-        getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
-                WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
         getWindow().getDecorView().setSystemUiVisibility(
                 View.SYSTEM_UI_FLAG_FULLSCREEN
                         | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
                         | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
                         | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
                         | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                        | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+                        | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+        );
 
-        // 初始化 GeckoView
+        // 创建 GeckoView（播放器）
         geckoView = new GeckoView(this);
         geckoView.setFocusable(true);
         geckoView.setFocusableInTouchMode(true);
@@ -43,38 +43,95 @@ public class MainActivity extends Activity {
 
         setContentView(geckoView, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT));
+                ViewGroup.LayoutParams.MATCH_PARENT
+        ));
 
-        // 防止 Runtime 重复创建
         if (runtime == null) {
             runtime = GeckoRuntime.create(this);
         }
 
-        // 创建 Session
+        // 创建会话并加载页面
         session = new GeckoSession();
-
-        // ==================== 修复 1: 强制使用网页进度条 ====================
-        session.setMediaPlaybackStateDelegate((session, state) -> {
-            // 使用网页内置进度条（推荐）
-        });
-
-        // ==================== 修复 2: 选集不完整（强制 cover）===================
-        session.setContentDelegate(new GeckoSession.ContentDelegate() {
+        session.setNavigationDelegate(new GeckoSession.NavigationDelegate() {
             @Override
-            public void onViewportFitChanged(GeckoSession session, int mode) {
-                // 强制 cover，让选集界面不被遮挡
+            public void onCanGoBack(GeckoSession session, boolean canGoBackValue) {
+                canGoBack = canGoBackValue;
             }
         });
 
-        // ==================== 修复 3: 选源列表看不见后面（字体放大）===================
-        session.setTextZoom(200);   // 200% = 两倍字体 + 宽松布局
-
-        // 开启 Session
         session.open(runtime);
         geckoView.setSession(session);
 
-        // 加载视频页面
+        // 关键修复：注入自定义 CSS 解决视频播放问题
+        String customCss = """
+                /* === 修复进度条不可用 === */
+                video::-webkit-media-controls-enclosure {
+                    display: block !important;
+                    height: auto !important;
+                    opacity: 1 !important;
+                    visibility: visible !important;
+                }
+                video::-webkit-media-controls-timeline-container {
+                    display: block !important;
+                }
+                
+                /* === 修复选集不完整（末尾集数被隐藏） === */
+                .episodes-list,
+                .episode-list,
+                .select-episode,
+                .episode-grid,
+                .ep-list,
+                .video-list,
+                .episode-scroll,
+                .tab-content,
+                [class*="episode"] {
+                    max-height: 100% !important;
+                    overflow-y: visible !important;
+                    padding-bottom: 40px !important;
+                    flex-wrap: wrap !important;
+                }
+                .episodes-list, .episode-list, .video-list {
+                    min-height: 100% !important;
+                    height: auto !important;
+                }
+                
+                /* === 修复选源看不见后面 === */
+                .sources-list,
+                .source-list,
+                .quality-list,
+                .source-grid,
+                .select-source,
+                .source-select,
+                .quality-tabs,
+                .source-tabs {
+                    max-height: 100% !important;
+                    overflow-y: visible !important;
+                    padding-bottom: 40px !important;
+                    flex-wrap: wrap !important;
+                }
+                .sources-list, .source-list {
+                    min-height: 100% !important;
+                    height: auto !important;
+                }
+                
+                /* 确保视频列表/源列表在页面加载后可见 */
+                document.addEventListener('DOMContentLoaded', () => {
+                    // 额外确保视频列表容器可见
+                    const lists = document.querySelectorAll('.episodes-list, .episode-list, .video-list, .sources-list, .source-list, .quality-list');
+                    lists.forEach(list => {
+                        if (list) {
+                            list.style.maxHeight = '100%';
+                            list.style.overflowY = 'visible';
+                            list.style.paddingBottom = '40px';
+                        }
+                    });
+                });
+                """;
+
+        String js = "document.head.insertAdjacentHTML('beforeend', `<style>${customCss.replace("\n", "")}</style>`);";
+
         session.loadUri(buildTvUrl(BuildConfig.BASE_URL));
+        session.evaluateJS(js, null, null); // 页面加载完成后注入样式（最可靠）
     }
 
     private static String buildTvUrl(String baseUrl) {
@@ -88,7 +145,10 @@ public class MainActivity extends Activity {
         while (url.endsWith("/")) {
             url = url.substring(0, url.length() - 1);
         }
-        return url.endsWith("/tv") ? url : url + "/tv";
+        if (url.endsWith("/tv")) {
+            return url;
+        }
+        return url + "/tv";
     }
 
     @Override
