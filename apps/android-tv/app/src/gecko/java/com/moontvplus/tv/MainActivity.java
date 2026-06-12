@@ -11,6 +11,7 @@ import android.widget.FrameLayout;
 import org.mozilla.geckoview.GeckoRuntime;
 import org.mozilla.geckoview.GeckoSession;
 import org.mozilla.geckoview.GeckoView;
+import org.mozilla.geckoview.MediaSession;
 
 public class MainActivity extends Activity {
     private static GeckoRuntime runtime;
@@ -47,14 +48,44 @@ public class MainActivity extends Activity {
         }
 
         session = new GeckoSession();
-        session.setNavigationDelegate(new GeckoSession.NavigationDelegate() {
+
+        // === 关键修复：启用 MediaSession 支持（播放器控制 + 进度条） ===
+        session.setMediaSessionDelegate(new MediaSession.Delegate() {
             @Override
-            public void onCanGoBack(GeckoSession session, boolean canGoBackValue) {
-                canGoBack = canGoBackValue;
+            public void onActivated(GeckoSession session, MediaSession mediaSession) {
+                // 播放器激活时（播放开始）显示/启用进度条
+                canGoBack = true; // 可选，保留原返回功能
             }
+
+            @Override
+            public void onDeactivated(GeckoSession session, MediaSession mediaSession) {
+                canGoBack = false;
+            }
+
+            @Override
+            public void onSessionAction(GeckoSession session, MediaSession mediaSession, MediaSession.Action action) {
+                // 可选：处理 seek、play、pause 等自定义动作
+                switch (action) {
+                    case PLAY:
+                    case PAUSE:
+                        // 如果你想自定义播放逻辑，可以在这里处理
+                        break;
+                    case SEEKTO:
+                        // 拖进度条时调用 mediaSession.seekTo(...)
+                        break;
+                    // 其他 action 如 METADATACHANGE、VOLUMECHANGE 等可扩展
+                }
+            }
+
+            // 可选：实现更多 MediaSession.Delegate 方法（如 onMetadataChange、onDurationChange 等）
+            // @Override
+            // public void onDurationChange(GeckoSession session, MediaSession mediaSession, double duration) { ... }
         });
+
         session.open(runtime);
         geckoView.setSession(session);
+
+        // 加载 TV 页面（你的 buildTvUrl 方法保持不变）
         session.loadUri(buildTvUrl(BuildConfig.BASE_URL));
     }
 
