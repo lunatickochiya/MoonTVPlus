@@ -222,20 +222,6 @@ function moveHorizontalRowFocus(
   return true;
 }
 
-function moveExplicitFocus(
-  active: HTMLElement,
-  direction: 'up' | 'down' | 'left' | 'right'
-) {
-  const selector = active.getAttribute(`data-tv-focus-${direction}`);
-  if (!selector) return false;
-
-  const target = document.querySelector<HTMLElement>(selector);
-  if (!target || !isVisible(target)) return false;
-
-  focusElement(target);
-  return true;
-}
-
 function focusElement(element: HTMLElement) {
   element.focus({ preventScroll: true });
 
@@ -287,8 +273,6 @@ function moveSpatialFocus(
     focusElement(elements[0]);
     return;
   }
-
-  if (moveExplicitFocus(active, direction)) return;
 
   if (
     (direction === 'left' || direction === 'right') &&

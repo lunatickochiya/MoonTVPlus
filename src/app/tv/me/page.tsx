@@ -22,7 +22,6 @@ import {
   useState,
 } from 'react';
 
-import useTVLocalRemoteUrl from '@/hooks/useTVLocalRemoteUrl';
 import { clearAuthCookie, getAuthInfoFromBrowserCookie } from '@/lib/auth';
 import {
   type TVPlayerUpDownAction,
@@ -32,7 +31,19 @@ import {
 } from '@/lib/tv-preferences';
 
 import TVLayout from '@/components/tv/TVLayout';
-import TVLocalRemoteQRCode from '@/components/tv/TVLocalRemoteQRCode';
+
+const LOCAL_REMOTE_URL_KEY = 'moontv_local_remote_url';
+
+type MoonTVLocalRemoteBridge = {
+  getRemoteUrl?: () => string;
+};
+
+declare global {
+  interface Window {
+    MoonTVLocalRemote?: MoonTVLocalRemoteBridge;
+    __MOONTV_LOCAL_REMOTE_URL?: string;
+  }
+}
 
 type AuthInfo = {
   username?: string;
@@ -75,7 +86,7 @@ export default function TVMePage() {
   const [authInfo, setAuthInfo] = useState<AuthInfo | null>(null);
   const [loggingOut, setLoggingOut] = useState(false);
   const [error, setError] = useState('');
-  const localRemoteUrl = useTVLocalRemoteUrl();
+  const [localRemoteUrl, setLocalRemoteUrl] = useState('');
   const [upDownAction, setUpDownAction] = useState<TVPlayerUpDownAction>(
     DEFAULT_TV_PLAYER_UP_DOWN_ACTION
   );
@@ -87,6 +98,32 @@ export default function TVMePage() {
     setAuthInfo(auth);
     setUpDownAction(loadTVPlayerUpDownAction());
     setReady(true);
+  }, []);
+
+  useEffect(() => {
+    const readLocalRemoteUrl = () => {
+      const bridgeUrl = window.MoonTVLocalRemote?.getRemoteUrl?.() || '';
+      setLocalRemoteUrl(
+        bridgeUrl ||
+        window.__MOONTV_LOCAL_REMOTE_URL ||
+        localStorage.getItem(LOCAL_REMOTE_URL_KEY) ||
+        ''
+      );
+    };
+
+    const onLocalRemoteInfo = (event: Event) => {
+      const detail = (event as CustomEvent<{ url?: string }>).detail;
+      setLocalRemoteUrl(detail?.url || '');
+    };
+
+    readLocalRemoteUrl();
+    window.addEventListener('moontv:local-remote-info', onLocalRemoteInfo);
+    const timer = window.setInterval(readLocalRemoteUrl, 1500);
+
+    return () => {
+      window.removeEventListener('moontv:local-remote-info', onLocalRemoteInfo);
+      window.clearInterval(timer);
+    };
   }, []);
 
   useEffect(() => {
@@ -230,8 +267,6 @@ export default function TVMePage() {
                   type='button'
                   onClick={handleLogout}
                   disabled={loggingOut}
-                  data-tv-me-logout
-                  data-tv-focus-down='[data-tv-local-remote-qr]'
                   className='tv-focusable flex w-full cursor-pointer items-center justify-center gap-3 rounded-3xl bg-rose-600 px-7 py-5 text-3xl font-black text-white outline-none transition duration-200 hover:bg-rose-500 focus:ring-4 focus:ring-rose-300 disabled:cursor-not-allowed disabled:opacity-70'
                 >
                   {loggingOut ? (
@@ -276,11 +311,16 @@ export default function TVMePage() {
               </div>
 
               {localRemoteUrl && (
-                <TVLocalRemoteQRCode
-                  remoteUrl={localRemoteUrl}
-                  focusUp='[data-tv-me-logout]'
-                  focusDown='[data-tv-preference-up-down-action] button'
-                />
+                <div className='shrink-0 rounded-[32px] border border-white/15 bg-white p-4 shadow-2xl shadow-black/40'>
+                  <img
+                    src={`/api/auth/qr/image?data=${encodeURIComponent(localRemoteUrl)}`}
+                    alt='局域网遥控地址二维码'
+                    className='h-64 w-64 rounded-2xl'
+                  />
+                  <div className='mt-3 text-center text-base font-black text-slate-950'>
+                    手机扫码打开遥控器
+                  </div>
+                </div>
               )}
             </div>
           </div>
